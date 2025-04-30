@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = [
+    "prover",
+    "verifier",
+    "trusted_setup",
+    "protocol",
+    "network",
+]
+
+[workspace.dependencies]
+futures = "0.3.31"
+tokio = { version = "1.44.2", features = ["rt-multi-thread"] }
+tracing = "0.1.41"
+serde = "1.0.219"
+eyre = "0.6.12"
