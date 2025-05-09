@@ -6,11 +6,16 @@ members = [
     "trusted_setup",
     "protocol",
     "network",
+    "logger",
 ]
 
 [workspace.dependencies]
+network = { path = "network" }
+protocol = { path = "protocol" }
+logger = { path = "logger" }
+
+tokio = { version = "1.45", features = ["rt-multi-thread"] }
 futures = "0.3.31"
-tokio = { version = "1.44.2", features = ["rt-multi-thread"] }
-tracing = "0.1.41"
 serde = "1.0.219"
 eyre = "0.6.12"
+test-log = { version = "0.2.17", features = ["trace"] }

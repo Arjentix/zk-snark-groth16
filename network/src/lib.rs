@@ -11,7 +11,8 @@ use futures::{SinkExt, StreamExt as _};
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
-use tracing::{debug, info};
+
+use logger::{debug, info};
 
 const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
 const CONNECT_RETRY_COUNT: usize = 3;
@@ -31,11 +32,7 @@ impl Network {
     /// Establish a network connection with this node and the given peers.
     ///
     /// Connections are coordinated such that the lower address connects to the higher address.
-    pub async fn establish(
-        listen_addr: impl Into<SocketAddr>,
-        peers: impl ToSocketAddrs,
-    ) -> Result<Self> {
-        let listen_addr = listen_addr.into();
+    pub async fn establish(listen_addr: SocketAddr, peers: impl ToSocketAddrs) -> Result<Self> {
         let addrs = peers
             .to_socket_addrs()
             .wrap_err("failed to resolve peer addresses")?;
@@ -156,8 +153,8 @@ mod tests {
     use std::sync::atomic::{AtomicU16, Ordering};
 
     use eyre::Result;
+    use logger::{Instrument as _, debug_span};
     use test_log::test;
-    use tracing::{Instrument, debug_span};
 
     use super::*;
 

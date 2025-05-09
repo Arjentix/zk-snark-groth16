@@ -4,8 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+logger.workspace = true
+
 tokio = { workspace = true, features = ["net", "time", "io-util", "macros"] }
-tracing.workspace = true
 futures.workspace = true
 serde.workspace = true
 eyre.workspace = true
@@ -14,5 +15,6 @@ bincode = { version = "2.0.1", features = ["serde"] }
 tokio-util = { version = "0.7.15", features = ["codec"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread"] }
-test-log = { version = "0.2.17", features = ["trace"] }
+test-log.workspace = true
+
+tokio = { workspace = true }
