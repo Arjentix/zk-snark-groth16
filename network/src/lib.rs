@@ -6,13 +6,13 @@ use std::{
     time::Duration,
 };
 
-use eyre::{Context as _, OptionExt as _, Result};
+use eyre::{Context as _, Result, bail};
 use futures::{SinkExt, StreamExt as _};
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
-use logger::{debug, info};
+use logger::{debug, info, warn};
 
 const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
 const CONNECT_RETRY_COUNT: usize = 3;
@@ -20,7 +20,7 @@ const CONNECT_RETRY_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Network to communicate with peers.
 pub struct Network {
-    peers: Box<[Peer]>,
+    peers: Vec<Peer>,
 }
 
 struct Peer {
@@ -57,37 +57,75 @@ impl Network {
         let mut streams = listen_streams;
         streams.append(&mut connect_streams);
 
-        Ok(Self {
-            peers: streams.into(),
-        })
+        Ok(Self { peers: streams })
     }
 
     /// Broadcast a message to all peers.
-    pub async fn broadcast<M: Serialize>(&mut self, msg: M) -> Result<()> {
+    pub async fn broadcast<M: Serialize + std::fmt::Debug>(&mut self, msg: M) -> Result<()> {
+        if self.peers.is_empty() {
+            warn!("no peers to send message to");
+            return Ok(());
+        }
+
+        let msg_debug = format!("{msg:?}");
         let bytes = bincode::serde::encode_to_vec(msg, BINCODE_CONFIG)
             .wrap_err("failed to encode message")?;
         let bytes = tokio_util::bytes::Bytes::from(bytes);
 
-        for peer in &mut self.peers {
-            peer.stream
-                .send(bytes.clone())
-                .await
-                .wrap_err_with(|| format!("failed to send message to {} peer", peer.addr))?
+        let mut disconnected_peers = Vec::new();
+        let broadcast_bytes = async {
+            for (peer_idx, peer) in self.peers.iter_mut().enumerate() {
+                match peer.stream.send(bytes.clone()).await {
+                    Ok(_) => {
+                        debug!(addr = %peer.addr, msg = %msg_debug, "sent message");
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => {
+                        info!(addr = %peer.addr, "connection with peer closed");
+                        disconnected_peers.push(peer_idx);
+                        continue;
+                    }
+                    Err(err) => {
+                        return Err(err).wrap_err_with(|| {
+                            format!("failed to send message to {} peer", peer.addr)
+                        });
+                    }
+                }
+            }
+
+            Ok(())
+        };
+
+        let broadcast_result = broadcast_bytes.await;
+
+        for peer_idx in disconnected_peers.into_iter().rev() {
+            self.peers.swap_remove(peer_idx);
         }
 
-        Ok(())
+        broadcast_result
     }
 
     /// Receive a message from any peer.
     pub async fn recv<M: DeserializeOwned + std::fmt::Debug>(&mut self) -> Result<M> {
-        let futures = self.peers.iter_mut().map(|peer| peer.stream.next());
-        let (msg, peer_idx, _remaining) = futures::future::select_all(futures).await;
-        let peer = &self.peers[peer_idx];
+        let (peer, msg) = loop {
+            if self.peers.is_empty() {
+                bail!("no peers to receive message from");
+            }
+
+            let futures = self.peers.iter_mut().map(|peer| peer.stream.next());
+            let (msg, peer_idx, _remaining) = futures::future::select_all(futures).await;
+            let peer = &self.peers[peer_idx];
+
+            match msg {
+                Some(msg) => break (peer, msg),
+                None => {
+                    info!(addr = %peer.addr, "connection with peer closed");
+                    self.peers.swap_remove(peer_idx);
+                }
+            }
+        };
 
         let msg = || -> eyre::Result<M> {
-            let bytes = msg
-                .map(|res| res.map_err(eyre::Report::from))
-                .ok_or_eyre("stream is closed")??;
+            let bytes = msg?;
             let (msg, _size) = bincode::serde::decode_from_slice::<M, _>(&bytes, BINCODE_CONFIG)
                 .wrap_err("failed to decode message")?;
 
@@ -150,9 +188,11 @@ impl Network {
 
 #[cfg(test)]
 mod tests {
+    use std::pin::pin;
     use std::sync::atomic::{AtomicU16, Ordering};
 
     use eyre::Result;
+    use futures::poll;
     use logger::{Instrument as _, debug_span};
     use test_log::test;
 
@@ -180,20 +220,153 @@ mod tests {
         let peers2 = [addrs[0], addrs[2]];
         let peers3 = &addrs[..2];
 
+        let span1 = debug_span!("net1");
+        let span2 = debug_span!("net2");
+        let span3 = debug_span!("net3");
+
         let (mut net1, mut net2, mut net3) = tokio::try_join!(
-            Network::establish(addrs[0], peers1).instrument(debug_span!("net1")),
-            Network::establish(addrs[1], peers2.as_slice()).instrument(debug_span!("net2")),
-            Network::establish(addrs[2], peers3).instrument(debug_span!("net3")),
+            Network::establish(addrs[0], peers1).instrument(span1.clone()),
+            Network::establish(addrs[1], peers2.as_slice()).instrument(span2.clone()),
+            Network::establish(addrs[2], peers3).instrument(span3.clone()),
         )
         .wrap_err("failed to establish networks")?;
 
-        net1.broadcast("hello").await?;
+        net1.broadcast("hello").instrument(span1).await?;
 
-        let msg2 = net2.recv::<String>().await?;
+        let msg2 = net2.recv::<String>().instrument(span2).await?;
         assert_eq!(msg2, "hello");
 
-        let msg3 = net3.recv::<String>().await?;
+        let msg3 = net3.recv::<String>().instrument(span3).await?;
         assert_eq!(msg3, "hello");
+
+        Ok(())
+    }
+
+    #[test(tokio::test)]
+    async fn broadcast_does_not_fail_on_disconnected_peer() -> Result<()> {
+        let addrs: Vec<_> = addr_generator().take(3).collect();
+
+        let peers1 = &addrs[1..];
+        let peers2 = [addrs[0], addrs[2]];
+        let peers3 = &addrs[..2];
+
+        let span1 = debug_span!("net1");
+        let span2 = debug_span!("net2");
+        let span3 = debug_span!("net3");
+
+        let (mut net1, net2, _net3) = tokio::try_join!(
+            Network::establish(addrs[0], peers1).instrument(span1.clone()),
+            Network::establish(addrs[1], peers2.as_slice()).instrument(span2),
+            Network::establish(addrs[2], peers3).instrument(span3),
+        )
+        .wrap_err("failed to establish networks")?;
+
+        drop(net2);
+
+        // Wait for the socket to be closed
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        net1.broadcast("hello1").instrument(span1.clone()).await?;
+        // One time may be not enough, so we try again
+        net1.broadcast("hello2").instrument(span1).await?;
+
+        Ok(())
+    }
+
+    #[test(tokio::test)]
+    async fn broadcast_does_not_fail_on_all_peers_disconnected() -> Result<()> {
+        let addrs: Vec<_> = addr_generator().take(3).collect();
+
+        let peers1 = &addrs[1..];
+        let peers2 = [addrs[0], addrs[2]];
+        let peers3 = &addrs[..2];
+
+        let span1 = debug_span!("net1");
+        let span2 = debug_span!("net2");
+        let span3 = debug_span!("net3");
+
+        let (mut net1, net2, net3) = tokio::try_join!(
+            Network::establish(addrs[0], peers1).instrument(span1.clone()),
+            Network::establish(addrs[1], peers2.as_slice()).instrument(span2),
+            Network::establish(addrs[2], peers3).instrument(span3),
+        )
+        .wrap_err("failed to establish networks")?;
+
+        drop(net2);
+        drop(net3);
+
+        // Wait for the sockets to be closed
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        net1.broadcast("hello1").instrument(span1.clone()).await?;
+        // One time may be not enough, so we try again
+        net1.broadcast("hello2").instrument(span1.clone()).await?;
+        // Repeating third time on empty peers list
+        net1.broadcast("hello3").instrument(span1).await?;
+
+        Ok(())
+    }
+
+    #[test(tokio::test)]
+    async fn recv_does_not_fail_on_disconnected_peer() -> Result<()> {
+        let addrs: Vec<_> = addr_generator().take(3).collect();
+
+        let peers1 = &addrs[1..];
+        let peers2 = [addrs[0], addrs[2]];
+        let peers3 = &addrs[..2];
+
+        let span1 = debug_span!("net1");
+        let span2 = debug_span!("net2");
+        let span3 = debug_span!("net3");
+
+        let (mut net1, net2, mut net3) = tokio::try_join!(
+            Network::establish(addrs[0], peers1).instrument(span1.clone()),
+            Network::establish(addrs[1], peers2.as_slice()).instrument(span2),
+            Network::establish(addrs[2], peers3).instrument(span3.clone()),
+        )
+        .wrap_err("failed to establish networks")?;
+
+        let mut msg3_fut = pin!(net3.recv::<String>().instrument(span3));
+        assert!(poll!(&mut msg3_fut).is_pending());
+
+        drop(net2);
+
+        // Wait for the socket to be closed
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        assert!(poll!(&mut msg3_fut).is_pending());
+
+        net1.broadcast("hello").instrument(span1).await?;
+
+        let msg3 = msg3_fut.await?;
+        assert_eq!(msg3, "hello");
+
+        Ok(())
+    }
+
+    #[test(tokio::test)]
+    async fn recv_fails_on_all_peers_disconnected() -> Result<()> {
+        let addrs: Vec<_> = addr_generator().take(3).collect();
+
+        let peers1 = &addrs[1..];
+        let peers2 = [addrs[0], addrs[2]];
+        let peers3 = &addrs[..2];
+
+        let span1 = debug_span!("net1");
+        let span2 = debug_span!("net2");
+        let span3 = debug_span!("net3");
+
+        let (mut net1, net2, net3) = tokio::try_join!(
+            Network::establish(addrs[0], peers1).instrument(span1.clone()),
+            Network::establish(addrs[1], peers2.as_slice()).instrument(span2),
+            Network::establish(addrs[2], peers3).instrument(span3),
+        )
+        .wrap_err("failed to establish networks")?;
+
+        drop(net2);
+        drop(net3);
+
+        assert!(net1.recv::<String>().instrument(span1).await.is_err());
 
         Ok(())
     }
