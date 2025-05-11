@@ -404,10 +404,20 @@ dependencies = [
 [[package]]
 name = "protocol"
 version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "prover"
 version = "0.1.0"
+dependencies = [
+ "eyre",
+ "logger",
+ "network",
+ "protocol",
+ "tokio",
+]
 
 [[package]]
 name = "quote"
@@ -669,6 +679,13 @@ dependencies = [
 [[package]]
 name = "trusted_setup"
 version = "0.1.0"
+dependencies = [
+ "eyre",
+ "logger",
+ "network",
+ "protocol",
+ "tokio",
+]
 
 [[package]]
 name = "unicode-ident"
@@ -697,6 +714,13 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 [[package]]
 name = "verifier"
 version = "0.1.0"
+dependencies = [
+ "eyre",
+ "logger",
+ "network",
+ "protocol",
+ "tokio",
+]
 
 [[package]]
 name = "virtue"
