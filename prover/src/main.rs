@@ -1,8 +1,8 @@
 use std::net::SocketAddr;
 
-use circuit_macro::circuit;
 use eyre::{Context as _, Result};
 
+use circuit::circuit;
 use network::Network;
 
 use prover::{qap::Qap, r1cs::R1cs};
@@ -22,58 +22,9 @@ async fn main() -> Result<()> {
     .await
     .wrap_err("failed to establish network")?;
 
-    // Circuit::new()
-    //     .add_constraint(
-    //         Expression::Plus {
-    //             left: Box::new(Expression::Minus {
-    //                 left: Box::new(Expression::Minus {
-    //                     left: Box::new(Expression::Plus {
-    //                         left: Box::new(Expression::Multiply {
-    //                             left: Box::new(Expression::Multiply {
-    //                                 left: Box::new(Expression::Multiply {
-    //                                     left: Box::new(Expression::Constant(3.0)),
-    //                                     right: Box::new(Expression::Variable("x")),
-    //                                 }),
-    //                                 right: Box::new(Expression::Variable("x")),
-    //                             }),
-    //                             right: Box::new(Expression::Variable("y")),
-    //                         }),
-    //                         right: Box::new(Expression::Multiply {
-    //                             left: Box::new(Expression::Multiply {
-    //                                 left: Box::new(Expression::Constant(5.0)),
-    //                                 right: Box::new(Expression::Variable("x")),
-    //                             }),
-    //                             right: Box::new(Expression::Variable("y")),
-    //                         }),
-    //                     }),
-    //                     right: Box::new(Expression::Variable("x")),
-    //                 }),
-    //                 right: Box::new(Expression::Multiply {
-    //                     left: Box::new(Expression::Constant(2.0)),
-    //                     right: Box::new(Expression::Variable("y")),
-    //                 }),
-    //             }),
-    //             right: Box::new(Expression::Constant(3.0)),
-    //         },
-    //         Expression::Variable("a"),
-    //     )
-    //     .add_constraint(
-    //         Expression::Plus {
-    //             left: Box::new(Expression::Multiply {
-    //                 left: Box::new(Expression::Constant(2.0)),
-    //                 right: Box::new(Expression::Variable("x")),
-    //             }),
-    //             right: Box::new(Expression::Variable("y")),
-    //         },
-    //         Expression::Minus {
-    //             left: Box::new(Expression::Variable("b")),
-    //             right: Box::new(Expression::Constant(5.0)),
-    //         },
-    //     );
-
     let circuit = circuit! {
-        3*x*x*y + 5*x*y - x - 2*y + 3 == a;
-        2*x + y == b - 5;
+        -3.0*x*x*y + 5.0*x*y - (x - 2.0)*y + 3.0 == a;
+        2.0*x + y == b - 5.0;
     };
     let r1cs = R1cs::from(circuit);
     let _qap = Qap::from(r1cs);

@@ -1,5 +1,7 @@
 //! Arithmetic circuit utilities.
 
+pub use circuit_macro::circuit;
+
 /// Arithmetic circuit.
 #[derive(Debug, Default)]
 pub struct Circuit {
@@ -15,37 +17,36 @@ impl Circuit {
     }
 
     /// Add a constraint to the circuit.
-    pub fn add_constraint(mut self, left: Expression, right: Expression) -> Self {
-        self.constraints.push(Constraint { left, right });
+    pub fn add_constraint(mut self, constraint: Constraint) -> Self {
+        self.constraints.push(constraint);
         self
     }
 }
 
 #[derive(Debug)]
-struct Constraint {
-    left: Expression,
-    right: Expression,
+pub struct Constraint {
+    pub left: Expression,
+    pub right: Expression,
 }
 
 #[derive(Debug)]
 pub enum Expression {
-    Plus {
+    Add {
         left: Box<Expression>,
         right: Box<Expression>,
     },
-    Minus {
+    Sub {
         left: Box<Expression>,
         right: Box<Expression>,
     },
-    Multiply {
+    Mul {
         left: Box<Expression>,
         right: Box<Expression>,
     },
-    Divide {
+    Div {
         left: Box<Expression>,
         right: Box<Expression>,
     },
-    Constant(f64),
-    Variable(&'static str),
-    UnaryMinusVariable(&'static str),
+    Const(f64),
+    Var(&'static str),
 }

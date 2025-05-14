@@ -4,12 +4,14 @@ members = [
     "prover",
     "verifier",
     "trusted_setup",
+    "circuit",
     "protocol",
     "network",
     "logger",
 ]
 
 [workspace.dependencies]
+circuit = { path = "circuit" }
 network = { path = "network" }
 protocol = { path = "protocol" }
 logger = { path = "logger" }

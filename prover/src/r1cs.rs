@@ -1,6 +1,6 @@
 //! Rank One Constraint System (R1CS) utilities.
 
-use crate::circuit::Circuit;
+use circuit::Circuit;
 
 /// Rank One Constraint System.
 pub struct R1cs {}
