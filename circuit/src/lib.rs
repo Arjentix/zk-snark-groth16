@@ -41,6 +41,7 @@ pub enum Expression {
         left: Box<Expression>,
         right: Box<Expression>,
     },
+    UnaryMinus(Box<Expression>),
     Const(f64),
     Var(&'static str),
 }

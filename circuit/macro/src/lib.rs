@@ -108,10 +108,9 @@ fn recursively_transform_expression(expr: Box<syn::Expr>) -> TokenStream2 {
         }) => {
             let expr = recursively_transform_expression(expr);
             quote! {
-                ::circuit::Expression::Sub {
-                    left: ::std::boxed::Box::new(::circuit::Expression::Const(0.0)),
-                    right: ::std::boxed::Box::new(#expr),
-                }
+                ::circuit::Expression::UnaryMinus(
+                    ::std::boxed::Box::new(#expr),
+                )
             }
         }
         syn::Expr::Lit(syn::ExprLit {
