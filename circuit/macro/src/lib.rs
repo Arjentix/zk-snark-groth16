@@ -15,14 +15,15 @@ pub fn circuit(input: TokenStream) -> TokenStream {
         .map(transform_constraint)
         .collect();
 
-    quote! {
-        ::circuit::Circuit::new()
+    quote! {{
+        let mut __circuit = ::circuit::Circuit::new();
             #(
-                .add_constraint(
+                __circuit.constraints.push(
                     #constraints
-                )
+                );
             )*
-    }
+        __circuit
+    }}
     .into()
 }
 

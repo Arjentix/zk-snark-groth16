@@ -5,7 +5,7 @@ pub use circuit_macro::circuit;
 /// Arithmetic circuit.
 #[derive(Debug, Default)]
 pub struct Circuit {
-    constraints: Vec<Constraint>,
+    pub constraints: Vec<Constraint>,
 }
 
 impl Circuit {
@@ -14,12 +14,6 @@ impl Circuit {
         Self {
             constraints: Vec::new(),
         }
-    }
-
-    /// Add a constraint to the circuit.
-    pub fn add_constraint(mut self, constraint: Constraint) -> Self {
-        self.constraints.push(constraint);
-        self
     }
 }
 
