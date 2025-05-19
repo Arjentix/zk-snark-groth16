@@ -1,11 +1,9 @@
 use std::net::SocketAddr;
 
-use eyre::{Context as _, Result};
-
 use circuit::circuit;
+use eyre::{Context as _, Result};
 use network::Network;
-
-use prover::{qap::Qap, r1cs::R1cs};
+use prover::{qap::Qap, r1cs};
 
 #[tokio::main]
 async fn main() -> Result<()> {

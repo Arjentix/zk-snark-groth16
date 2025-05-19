@@ -1,7 +1,6 @@
 use std::net::SocketAddr;
 
 use eyre::{Context as _, Result};
-
 use network::Network;
 
 #[tokio::main]

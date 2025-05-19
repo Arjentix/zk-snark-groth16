@@ -8,11 +8,10 @@ use std::{
 
 use eyre::{Context as _, Result, bail};
 use futures::{SinkExt, StreamExt as _};
+use logger::{debug, info, warn};
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
-
-use logger::{debug, info, warn};
 
 const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
 const CONNECT_RETRY_COUNT: usize = 3;
@@ -188,8 +187,10 @@ impl Network {
 
 #[cfg(test)]
 mod tests {
-    use std::pin::pin;
-    use std::sync::atomic::{AtomicU16, Ordering};
+    use std::{
+        pin::pin,
+        sync::atomic::{AtomicU16, Ordering},
+    };
 
     use eyre::Result;
     use futures::poll;

@@ -1,13 +1,12 @@
 //! Logging utilities.
 
 use eyre::{Context as _, Result};
-use tracing::{Level, level_filters::LevelFilter};
-use tracing_subscriber::{EnvFilter, FmtSubscriber};
-
 pub use tracing::{
     Instrument, Span, debug, debug_span, error, error_span, info, info_span, trace, trace_span,
     warn, warn_span,
 };
+use tracing::{Level, level_filters::LevelFilter};
+use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 /// Initialize logger.
 pub fn init_logger() -> Result<()> {

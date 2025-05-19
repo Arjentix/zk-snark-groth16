@@ -1,5 +1,4 @@
 use proc_macro::TokenStream;
-
 use proc_macro_error2::{ResultExt as _, abort, proc_macro_error};
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
