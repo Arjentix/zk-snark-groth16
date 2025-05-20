@@ -11,3 +11,4 @@ logger.workspace = true
 
 tokio.workspace = true
 eyre.workspace = true
+ndarray = "0.16.1"

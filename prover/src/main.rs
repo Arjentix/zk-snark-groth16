@@ -24,7 +24,7 @@ async fn main() -> Result<()> {
         -3.0*x*x*y + 5.0*x*y - (x - 2.0)*y + 3.0 == a;
         2.0*x + y == b - 5.0;
     };
-    let r1cs = R1cs::from(circuit);
+    let (r1cs, _witness_schema) = r1cs::derive(circuit);
     let _qap = Qap::from(r1cs);
 
     network
