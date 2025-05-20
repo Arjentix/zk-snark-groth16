@@ -23,7 +23,9 @@ pub struct Constraint {
     pub right: Expression,
 }
 
-#[derive(Debug)]
+/// Expression in the circuit.
+/// Note that division is not supported.
+#[derive(Debug, Clone)]
 pub enum Expression {
     Add {
         left: Box<Expression>,
@@ -34,10 +36,6 @@ pub enum Expression {
         right: Box<Expression>,
     },
     Mul {
-        left: Box<Expression>,
-        right: Box<Expression>,
-    },
-    Div {
         left: Box<Expression>,
         right: Box<Expression>,
     },

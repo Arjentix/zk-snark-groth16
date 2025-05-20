@@ -92,12 +92,6 @@ fn recursively_transform_expression(expr: Box<syn::Expr>) -> TokenStream2 {
                         right: ::std::boxed::Box::new(#right),
                     }
                 },
-                syn::BinOp::Div(_) => quote! {
-                    ::circuit::Expression::Div {
-                        left: ::std::boxed::Box::new(#left),
-                        right: ::std::boxed::Box::new(#right),
-                    }
-                },
                 _ => abort!(op, "unsupported operator"),
             }
         }
