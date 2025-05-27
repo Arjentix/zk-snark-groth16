@@ -1,10 +1,15 @@
 //! Arithmetic circuit utilities.
 
+use std::{borrow::Cow, collections::HashSet};
+
 pub use circuit_macro::circuit;
+
+pub type VarName = Cow<'static, str>;
 
 /// Arithmetic circuit.
 #[derive(Debug, Default)]
 pub struct Circuit {
+    pub vars: HashSet<VarName>,
     pub constraints: Vec<Constraint>,
 }
 
@@ -12,6 +17,7 @@ impl Circuit {
     /// Create a new circuit.
     pub fn new() -> Self {
         Self {
+            vars: HashSet::new(),
             constraints: Vec::new(),
         }
     }
@@ -19,40 +25,31 @@ impl Circuit {
 
 #[derive(Debug)]
 pub struct Constraint {
-    pub left: Expression,
-    pub right: Expression,
+    pub left: Expr,
+    pub right: Expr,
 }
 
 /// Expression in the circuit.
 /// Note that division is not supported.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Expression {
-    Add {
-        left: Box<Expression>,
-        right: Box<Expression>,
-    },
-    Sub {
-        left: Box<Expression>,
-        right: Box<Expression>,
-    },
-    Mul {
-        left: Box<Expression>,
-        right: Box<Expression>,
-    },
-    UnaryMinus(Box<Expression>),
+pub enum Expr {
+    Add { left: Box<Expr>, right: Box<Expr> },
+    Sub { left: Box<Expr>, right: Box<Expr> },
+    Mul { left: Box<Expr>, right: Box<Expr> },
+    UnaryMinus(Box<Expr>),
     Const(f64),
-    Var(&'static str),
+    Var(VarName),
 }
 
-impl std::fmt::Display for Expression {
+impl std::fmt::Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Expression::Add { left, right } => write!(f, "({left} + {right})"),
-            Expression::Sub { left, right } => write!(f, "({left} - {right})"),
-            Expression::Mul { left, right } => write!(f, "({left} * {right})"),
-            Expression::UnaryMinus(expr) => write!(f, "-{expr}"),
-            Expression::Const(value) => write!(f, "{value}"),
-            Expression::Var(name) => write!(f, "{name}"),
+            Expr::Add { left, right } => write!(f, "({left} + {right})"),
+            Expr::Sub { left, right } => write!(f, "({left} - {right})"),
+            Expr::Mul { left, right } => write!(f, "({left} * {right})"),
+            Expr::UnaryMinus(expr) => write!(f, "-{expr}"),
+            Expr::Const(value) => write!(f, "{value}"),
+            Expr::Var(name) => write!(f, "{name}"),
         }
     }
 }

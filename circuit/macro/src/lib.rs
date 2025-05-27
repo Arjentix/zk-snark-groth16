@@ -1,7 +1,9 @@
+use std::collections::HashSet;
+
 use proc_macro::TokenStream;
 use proc_macro_error2::{ResultExt as _, abort, proc_macro_error};
 use proc_macro2::TokenStream as TokenStream2;
-use quote::quote;
+use quote::{ToTokens, quote};
 use syn::{parse::Parse, punctuated::Punctuated};
 
 #[proc_macro_error]
@@ -9,19 +11,28 @@ use syn::{parse::Parse, punctuated::Punctuated};
 pub fn circuit(input: TokenStream) -> TokenStream {
     let input = syn::parse::<Circuit>(input).expect_or_abort("failed to parse circuit");
 
+    let mut vars = HashSet::new();
     let constraints: Vec<_> = input
         .constraints
         .into_iter()
-        .map(transform_constraint)
+        .map(|c| transform_constraint(c, &mut vars))
         .collect();
+
+    let vars = vars.into_iter().map(|var| {
+        quote! {
+            ::std::borrow::Cow::Borrowed(#var)
+        }
+    });
 
     quote! {{
         let mut __circuit = ::circuit::Circuit::new();
-            #(
-                __circuit.constraints.push(
-                    #constraints
-                );
-            )*
+        __circuit.vars.extend([#(#vars),*]);
+        #(
+            __circuit.constraints.push(
+                #constraints
+            );
+        )*
+
         __circuit
     }}
     .into()
@@ -43,7 +54,7 @@ impl Parse for Circuit {
     }
 }
 
-fn transform_constraint(constraint: syn::Expr) -> TokenStream2 {
+fn transform_constraint(constraint: syn::Expr, vars: &mut HashSet<String>) -> TokenStream2 {
     let syn::Expr::Binary(syn::ExprBinary {
         op: syn::BinOp::Eq(_),
         left,
@@ -54,8 +65,8 @@ fn transform_constraint(constraint: syn::Expr) -> TokenStream2 {
         abort!(constraint, "expected `==`")
     };
 
-    let left = recursively_transform_expression(left);
-    let right = recursively_transform_expression(right);
+    let left = recursively_transform_expression(left, vars);
+    let right = recursively_transform_expression(right, vars);
 
     quote! {
         ::circuit::Constraint {
@@ -65,29 +76,32 @@ fn transform_constraint(constraint: syn::Expr) -> TokenStream2 {
     }
 }
 
-fn recursively_transform_expression(expr: Box<syn::Expr>) -> TokenStream2 {
+fn recursively_transform_expression(
+    expr: Box<syn::Expr>,
+    vars: &mut HashSet<String>,
+) -> TokenStream2 {
     match *expr {
         syn::Expr::Binary(syn::ExprBinary {
             op, left, right, ..
         }) => {
-            let left = recursively_transform_expression(left);
-            let right = recursively_transform_expression(right);
+            let left = recursively_transform_expression(left, vars);
+            let right = recursively_transform_expression(right, vars);
 
             match op {
                 syn::BinOp::Add(_) => quote! {
-                    ::circuit::Expression::Add {
+                    ::circuit::Expr::Add {
                         left: ::std::boxed::Box::new(#left),
                         right: ::std::boxed::Box::new(#right),
                     }
                 },
                 syn::BinOp::Sub(_) => quote! {
-                    ::circuit::Expression::Sub {
+                    ::circuit::Expr::Sub {
                         left: ::std::boxed::Box::new(#left),
                         right: ::std::boxed::Box::new(#right),
                     }
                 },
                 syn::BinOp::Mul(_) => quote! {
-                    ::circuit::Expression::Mul {
+                    ::circuit::Expr::Mul {
                         left: ::std::boxed::Box::new(#left),
                         right: ::std::boxed::Box::new(#right),
                     }
@@ -100,9 +114,9 @@ fn recursively_transform_expression(expr: Box<syn::Expr>) -> TokenStream2 {
             expr,
             ..
         }) => {
-            let expr = recursively_transform_expression(expr);
+            let expr = recursively_transform_expression(expr, vars);
             quote! {
-                ::circuit::Expression::UnaryMinus(
+                ::circuit::Expr::UnaryMinus(
                     ::std::boxed::Box::new(#expr),
                 )
             }
@@ -113,19 +127,24 @@ fn recursively_transform_expression(expr: Box<syn::Expr>) -> TokenStream2 {
         }) => {
             // Won't compile on caller-site, but the error message looks good
             quote! {
-                ::circuit::Expression::Const(#lit)
+                ::circuit::Expr::Const(#lit)
             }
         }
         syn::Expr::Lit(syn::ExprLit {
             lit: syn::Lit::Float(lit),
             ..
         }) => quote! {
-            ::circuit::Expression::Const(#lit)
+            ::circuit::Expr::Const(#lit)
         },
-        syn::Expr::Path(syn::ExprPath { path, .. }) => quote! {
-            ::circuit::Expression::Var(stringify!(#path))
-        },
-        syn::Expr::Paren(syn::ExprParen { expr, .. }) => recursively_transform_expression(expr),
+        syn::Expr::Path(syn::ExprPath { path, .. }) => {
+            vars.insert(path.to_token_stream().to_string());
+            quote! {
+                ::circuit::Expr::Var(::std::borrow::Cow::Borrowed(stringify!(#path)))
+            }
+        }
+        syn::Expr::Paren(syn::ExprParen { expr, .. }) => {
+            recursively_transform_expression(expr, vars)
+        }
         _ => abort!(
             expr,
             "unsupported expression. Allowed literals, parentheses and operations: +, -, *, /."

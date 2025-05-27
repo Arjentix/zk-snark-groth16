@@ -12,3 +12,7 @@ logger.workspace = true
 tokio.workspace = true
 eyre.workspace = true
 ndarray = "0.16.1"
+ahash = "0.8.12"
+
+[dev-dependencies]
+regex = "1.11.1"
