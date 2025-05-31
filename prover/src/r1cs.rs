@@ -1,11 +1,12 @@
 //! Rank One Constraint System (R1CS) utilities.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     hash::{BuildHasher as _, Hash as _, Hasher as _},
 };
 
 use circuit::{Circuit, Constraint, Expr, VarName};
+use sorted_vec::SortedVec;
 
 type Matrix = ndarray::Array2<f64>;
 
@@ -38,7 +39,6 @@ fn normalize(circuit: &mut Circuit) {
     for constraint in &mut circuit.constraints {
         move_right_to_left(&mut constraint.left, &mut constraint.right);
         reveal_brackets(&mut constraint.left);
-
         pack_var_multiplications(
             &circuit.vars,
             &mut constraint.left,
@@ -46,6 +46,7 @@ fn normalize(circuit: &mut Circuit) {
             &mut new_var_names,
             &mut false,
         );
+        sum_terms(&mut constraint.left);
     }
 
     new_constraints.append(&mut constraints);
@@ -180,10 +181,10 @@ fn reveal_brackets(expr: &mut Expr) {
 
             match &**sub_expr {
                 Expr::Add { left, right } => {
-                    // Replace `-(x + y)` with `-x - y`
+                    // Replace `-(x + y)` with `(-x) - y`
                     *expr = Expr::Sub {
                         left: Box::new(Expr::UnaryMinus(left.clone())),
-                        right: Box::new(Expr::UnaryMinus(right.clone())),
+                        right: right.clone(),
                     };
                 }
                 Expr::Sub { left, right } => {
@@ -261,10 +262,10 @@ fn pack_var_multiplications(
             );
         }
         Expr::Mul { left, right } => {
-            let mut found_vars = Vec::new();
-            let mut const_product = 1.0;
-            find_factors(left, &mut found_vars, &mut const_product);
-            find_factors(right, &mut found_vars, &mut const_product);
+            let mut found_vars = SortedVec::new();
+            let mut const_factor = 1.0;
+            find_factors(left, &mut found_vars, &mut const_factor);
+            find_factors(right, &mut found_vars, &mut const_factor);
 
             let var_expr = loop {
                 match found_vars.len() {
@@ -272,13 +273,17 @@ fn pack_var_multiplications(
                         break None;
                     }
                     1 => {
-                        break Some(found_vars.pop().expect("checked length = 1"));
+                        break Some(Expr::Var(found_vars.pop().expect("checked length = 1")));
                     }
                     2 if !*var_multiplication_set => {
                         *var_multiplication_set = true;
                         break Some(Expr::Mul {
-                            left: Box::new(found_vars.pop().expect("checked length = 2")),
-                            right: Box::new(found_vars.pop().expect("checked length = 2")),
+                            left: Box::new(Expr::Var(
+                                found_vars.pop().expect("checked length = 2"),
+                            )),
+                            right: Box::new(Expr::Var(
+                                found_vars.pop().expect("checked length = 2"),
+                            )),
                         });
                     }
                     _ => {
@@ -287,20 +292,18 @@ fn pack_var_multiplications(
                         let var1 = found_vars.pop().expect("checked length >= 2");
                         let var2 = found_vars.pop().expect("checked length >= 2");
 
-                        let (var1_name, var2_name, minus) = extract_var_names(&var1, &var2);
-                        let new_var_name = gen_var_name(var_names, var1_name, var2_name);
-                        let mut new_var = Expr::Var(new_var_name.clone());
+                        let new_var = gen_var_name(var_names, &var1, &var2);
 
-                        if new_var_names.insert(new_var_name.clone()) {
+                        if new_var_names.insert(new_var.clone()) {
                             // Created new variable, so we need to create a new constraint for
                             // it
 
                             let new_constraint = Constraint {
                                 left: Expr::Mul {
-                                    left: Box::new(var1),
-                                    right: Box::new(var2),
+                                    left: Box::new(Expr::Var(var1)),
+                                    right: Box::new(Expr::Var(var2)),
                                 },
-                                right: new_var.clone(),
+                                right: Expr::Var(new_var.clone()),
                             };
                             new_constraints.push(new_constraint);
                         } else {
@@ -308,36 +311,12 @@ fn pack_var_multiplications(
                             // no need to do it again
                         }
 
-                        if minus {
-                            new_var = Expr::UnaryMinus(Box::new(new_var));
-                        }
                         found_vars.push(new_var);
                     }
                 }
             };
 
-            match (var_expr, const_product) {
-                (_, 0.0) => {
-                    // If the const is 0, we can just ignore this multiplication
-                    *expr = Expr::Const(0.0);
-                }
-                (None, c) => {
-                    // If there are no variables, we can just replace the multiplication with a
-                    // constant
-                    *expr = Expr::Const(c);
-                }
-                (Some(var_expr), 1.0) => {
-                    // If the const is 1, we can just replace the multiplication with the variable
-                    *expr = var_expr;
-                }
-                (Some(var_expr), c) => {
-                    // Otherwise, we can replace the multiplication with a new variable
-                    *expr = Expr::Mul {
-                        left: Box::new(Expr::Const(c)),
-                        right: Box::new(var_expr),
-                    };
-                }
-            }
+            *expr = mul_var_expr_and_const_factor(var_expr, const_factor);
         }
         Expr::UnaryMinus(sub_expr) => {
             pack_var_multiplications(
@@ -352,46 +331,118 @@ fn pack_var_multiplications(
     }
 }
 
-/// Extract variable names and return `true` if variable multiplication gives a negative variable
-/// (e.g. one of the expressions is [`Expr::UnaryMinus`]).
-#[track_caller]
-fn extract_var_names<'first, 'second>(
-    var1: &'first Expr,
-    var2: &'second Expr,
-) -> (&'first VarName, &'second VarName, bool) {
-    match (&var1, &var2) {
-        (Expr::Var(var1_name), Expr::Var(var2_name)) => (var1_name, var2_name, false),
-        (Expr::Var(var1_name), Expr::UnaryMinus(sub_expr)) => match &**sub_expr {
-            Expr::Var(var2_name) => (var1_name, var2_name, true),
-            _ => panic!("expected variable after unary minus"),
-        },
-        (Expr::UnaryMinus(sub_expr), Expr::Var(var2_name)) => match &**sub_expr {
-            Expr::Var(var1_name) => (var1_name, var2_name, true),
-            _ => panic!("expected variable after unary minus"),
-        },
-        (Expr::UnaryMinus(sub_expr1), Expr::UnaryMinus(sub_expr2)) => {
-            match (&**sub_expr1, &**sub_expr2) {
-                (Expr::Var(var1_name), Expr::Var(var2_name)) => (var1_name, var2_name, false),
-                _ => panic!("expected variables after unary minus"),
+/// Sums terms in the expression, e.g. `2 * a + 3 * a - a` becomes `4 * a`.
+fn sum_terms(expr: &mut Expr) {
+    let mut terms = HashMap::new();
+    sum_terms_recursively(expr, &mut terms, 1);
+
+    let mut new_expr = None;
+    for (vars, const_factor) in terms {
+        if const_factor == 0.0 {
+            continue;
+        }
+
+        let var_expr = mul_vars(&vars);
+        let term_expr = mul_var_expr_and_const_factor(var_expr, const_factor);
+
+        if let Some(existing_expr) = new_expr {
+            new_expr = Some(Expr::Add {
+                left: Box::new(existing_expr),
+                right: Box::new(term_expr),
+            });
+        } else {
+            new_expr = Some(term_expr);
+        }
+    }
+
+    *expr = new_expr.unwrap_or(Expr::Const(0.0));
+}
+
+fn sum_terms_recursively(expr: &Expr, terms: &mut HashMap<SortedVec<VarName>, f64>, sign: i8) {
+    match expr {
+        Expr::Add { left, right } => {
+            sum_terms_recursively(left, terms, sign);
+            sum_terms_recursively(right, terms, sign);
+        }
+        Expr::Sub { left, right } => {
+            sum_terms_recursively(left, terms, sign);
+            sum_terms_recursively(right, terms, -sign);
+        }
+        Expr::Mul { left, right } => {
+            let mut found_vars = SortedVec::new();
+            let mut const_factor = sign as f64;
+            find_factors(left, &mut found_vars, &mut const_factor);
+            find_factors(right, &mut found_vars, &mut const_factor);
+
+            *terms.entry(found_vars).or_default() += const_factor;
+        }
+        Expr::UnaryMinus(sub_expr) => {
+            sum_terms_recursively(sub_expr, terms, -sign);
+        }
+        Expr::Var(var) => {
+            *terms.entry(SortedVec::from(vec![var.clone()])).or_default() += sign as f64;
+        }
+        Expr::Const(c) => {
+            *terms.entry(SortedVec::default()).or_default() += (sign as f64) * (*c);
+        }
+    }
+}
+
+fn mul_vars(vars: &[VarName]) -> Option<Expr> {
+    match vars.len() {
+        0 => None,
+        1 => Some(Expr::Var(vars[0].clone())),
+        _ => Some(Expr::Mul {
+            left: Box::new(Expr::Var(vars[0].clone())),
+            right: Box::new(mul_vars(&vars[1..]).unwrap_or_else(|| unreachable!("never empty"))),
+        }),
+    }
+}
+
+fn mul_var_expr_and_const_factor(var_expr: Option<Expr>, const_factor: f64) -> Expr {
+    match (var_expr, const_factor) {
+        (_, 0.0) => {
+            // If the const is 0, we can just ignore this multiplication
+            Expr::Const(0.0)
+        }
+        (None, c) => {
+            // If there are no variables, we can just replace the multiplication with a
+            // constant
+            Expr::Const(c)
+        }
+        (Some(var_expr), 1.0) => {
+            // If the const is 1, we can just replace the multiplication with the variable
+            var_expr
+        }
+        (Some(var_expr), -1.0) => {
+            // If the const is -1, we can just replace the multiplication with the unary
+            // minus of the variable
+            Expr::UnaryMinus(Box::new(var_expr))
+        }
+        (Some(var_expr), c) => {
+            // Otherwise, we can replace the multiplication with a new variable
+            Expr::Mul {
+                left: Box::new(Expr::Const(c)),
+                right: Box::new(var_expr),
             }
         }
-        _ => panic!("expected variables or unary minus with variable"),
     }
 }
 
 #[track_caller]
-fn find_factors(expr: &Expr, found_vars: &mut Vec<Expr>, const_product: &mut f64) {
+fn find_factors(expr: &Expr, found_vars: &mut SortedVec<VarName>, const_factor: &mut f64) {
     match expr {
         Expr::Mul { left, right } => {
-            find_factors(left, found_vars, const_product);
-            find_factors(right, found_vars, const_product);
+            find_factors(left, found_vars, const_factor);
+            find_factors(right, found_vars, const_factor);
         }
-        Expr::UnaryMinus(sub_expr) => match **sub_expr {
-            Expr::Var(_) => {
-                found_vars.push(expr.clone());
+        Expr::UnaryMinus(sub_expr) => match &**sub_expr {
+            Expr::Var(var_name) => {
+                found_vars.push(var_name.clone());
+                *const_factor *= -1.0;
             }
             Expr::Const(c) => {
-                *const_product *= -c;
+                *const_factor *= -c;
             }
             _ => {
                 panic!(
@@ -399,11 +450,11 @@ fn find_factors(expr: &Expr, found_vars: &mut Vec<Expr>, const_product: &mut f64
                 );
             }
         },
-        Expr::Var(_) => {
-            found_vars.push(expr.clone());
+        Expr::Var(var_name) => {
+            found_vars.push(var_name.clone());
         }
         Expr::Const(c) => {
-            *const_product *= c;
+            *const_factor *= c;
         }
         Expr::Add { .. } | Expr::Sub { .. } => {
             panic!(
@@ -558,11 +609,79 @@ mod tests {
         );
 
         // (((-2 * (cb * a)) + dba) - (-db - (3 * d)))
+        // (((-2 * (a * cb)) + adb) - (-db - (3 * d)))
         let regex = Regex::new(
-            r"\(\(\(-2 \* \(__c_b_\d+ \* a\)\) \+ ____d_b_\d+_a_\d+\) - \(-__d_b_\d+ - \(3 \* d\)\)\)",
+            r"\(\(\(-2 \* \(a \* __c_b_\d+\)\) \+ __a___d_b_\d+_\d+\) - \(-__d_b_\d+ - \(3 \* d\)\)\)",
         )
         .unwrap();
-        assert!(regex.is_match(&expr.to_string()));
+        let expr = expr.to_string();
+        assert!(regex.is_match(&expr), "{expr} does not match {regex}");
         assert_eq!(new_constraints.len(), 3);
+    }
+
+    #[test]
+    fn test_sum_terms_smoke() {
+        // 2 * a * b * c + a * 3 * b * c - a * a * b * c
+        let mut expr = Expr::Add {
+            left: Box::new(Expr::Mul {
+                left: Box::new(Expr::Const(2.0)),
+                right: Box::new(Expr::Mul {
+                    left: Box::new(Expr::Var("a".into())),
+                    right: Box::new(Expr::Mul {
+                        left: Box::new(Expr::Var("b".into())),
+                        right: Box::new(Expr::Var("c".into())),
+                    }),
+                }),
+            }),
+            right: Box::new(Expr::Sub {
+                left: Box::new(Expr::Mul {
+                    left: Box::new(Expr::Var("a".into())),
+                    right: Box::new(Expr::Mul {
+                        left: Box::new(Expr::Const(3.0)),
+                        right: Box::new(Expr::Mul {
+                            left: Box::new(Expr::Var("b".into())),
+                            right: Box::new(Expr::Var("c".into())),
+                        }),
+                    }),
+                }),
+                right: Box::new(Expr::Mul {
+                    left: Box::new(Expr::Var("a".into())),
+                    right: Box::new(Expr::Mul {
+                        left: Box::new(Expr::Var("a".into())),
+                        right: Box::new(Expr::Mul {
+                            left: Box::new(Expr::Var("b".into())),
+                            right: Box::new(Expr::Var("c".into())),
+                        }),
+                    }),
+                }),
+            }),
+        };
+
+        // - a * a * b * c + 5 * a * b * c
+        let expected = Expr::Add {
+            left: Box::new(Expr::UnaryMinus(Box::new(Expr::Mul {
+                left: Box::new(Expr::Var("a".into())),
+                right: Box::new(Expr::Mul {
+                    left: Box::new(Expr::Var("a".into())),
+                    right: Box::new(Expr::Mul {
+                        left: Box::new(Expr::Var("b".into())),
+                        right: Box::new(Expr::Var("c".into())),
+                    }),
+                }),
+            }))),
+            right: Box::new(Expr::Mul {
+                left: Box::new(Expr::Const(5.0)),
+                right: Box::new(Expr::Mul {
+                    left: Box::new(Expr::Var("a".into())),
+                    right: Box::new(Expr::Mul {
+                        left: Box::new(Expr::Var("b".into())),
+                        right: Box::new(Expr::Var("c".into())),
+                    }),
+                }),
+            }),
+        };
+
+        sum_terms(&mut expr);
+        assert_eq!(expr, expected, "Expected: {expected}, got: {expr}");
     }
 }
