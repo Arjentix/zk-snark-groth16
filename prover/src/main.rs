@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 
 use circuit::circuit;
 use eyre::{Context as _, Result};
+use logger::info;
 use network::Network;
 use prover::{qap::Qap, r1cs};
 
@@ -24,6 +25,7 @@ async fn main() -> Result<()> {
         -3.0*x*x*y + 5.0*x*y - (x - 2.0)*y + 3.0 == a;
         2.0*x + y == b - 5.0;
     };
+    info!(circuit = %circuit, "input circuit");
     let (r1cs, _witness_schema) = r1cs::derive(circuit);
     let _qap = Qap::from(r1cs);
 

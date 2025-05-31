@@ -3,11 +3,13 @@
 use std::{borrow::Cow, collections::HashSet};
 
 pub use circuit_macro::circuit;
+use derive_more::Display;
+use itertools::Itertools as _;
 
 pub type VarName = Cow<'static, str>;
 
 /// Arithmetic circuit.
-#[derive(Debug, Default)]
+#[derive(Default, Debug)]
 pub struct Circuit {
     pub vars: HashSet<VarName>,
     pub constraints: Vec<Constraint>,
@@ -23,7 +25,18 @@ impl Circuit {
     }
 }
 
-#[derive(Debug)]
+impl std::fmt::Display for Circuit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.constraints
+            .iter()
+            .format_with("\n", |c, f| f(&format_args!("{c}")))
+            .fmt(f)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Display)]
+#[display("{left} == {right}")]
 pub struct Constraint {
     pub left: Expr,
     pub right: Expr,

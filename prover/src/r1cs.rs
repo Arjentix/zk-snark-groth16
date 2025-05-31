@@ -1,11 +1,12 @@
 //! Rank One Constraint System (R1CS) utilities.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     hash::{BuildHasher as _, Hash as _, Hasher as _},
 };
 
 use circuit::{Circuit, Constraint, Expr, VarName};
+use logger::info;
 use sorted_vec::SortedVec;
 
 type Matrix = ndarray::Array2<f64>;
@@ -27,6 +28,7 @@ pub struct WitnessSchema {
 /// Derives a R1CS and witness schema from a given circuit.
 pub fn derive(mut circuit: Circuit) -> (R1cs, WitnessSchema) {
     normalize(&mut circuit);
+    info!(circuit = %circuit, "normalized circuit");
 
     todo!()
 }
@@ -36,7 +38,7 @@ fn normalize(circuit: &mut Circuit) {
     let mut new_constraints = Vec::<circuit::Constraint>::new();
     let mut new_var_names = HashSet::new();
 
-    for constraint in &mut circuit.constraints {
+    for constraint in &mut constraints {
         move_right_to_left(&mut constraint.left, &mut constraint.right);
         reveal_brackets(&mut constraint.left);
         pack_var_multiplications(
@@ -333,7 +335,7 @@ fn pack_var_multiplications(
 
 /// Sums terms in the expression, e.g. `2 * a + 3 * a - a` becomes `4 * a`.
 fn sum_terms(expr: &mut Expr) {
-    let mut terms = HashMap::new();
+    let mut terms = BTreeMap::new();
     sum_terms_recursively(expr, &mut terms, 1);
 
     let mut new_expr = None;
@@ -358,7 +360,7 @@ fn sum_terms(expr: &mut Expr) {
     *expr = new_expr.unwrap_or(Expr::Const(0.0));
 }
 
-fn sum_terms_recursively(expr: &Expr, terms: &mut HashMap<SortedVec<VarName>, f64>, sign: i8) {
+fn sum_terms_recursively(expr: &Expr, terms: &mut BTreeMap<SortedVec<VarName>, f64>, sign: i8) {
     match expr {
         Expr::Add { left, right } => {
             sum_terms_recursively(left, terms, sign);

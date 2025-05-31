@@ -5,3 +5,5 @@ edition = "2024"
 
 [dependencies]
 circuit_macro = { path = "macro" }
+derive_more = { version = "2.0.1", features = ["display"] }
+itertools = "0.14.0"
