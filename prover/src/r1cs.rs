@@ -35,7 +35,7 @@ pub fn derive(mut circuit: Circuit) -> (R1cs, WitnessSchema) {
 
 fn normalize(circuit: &mut Circuit) {
     let mut constraints = std::mem::take(&mut circuit.constraints);
-    let mut new_constraints = Vec::<circuit::Constraint>::new();
+    let mut new_constraints = Vec::new();
     let mut new_var_names = HashSet::new();
 
     for constraint in &mut constraints {
@@ -49,6 +49,7 @@ fn normalize(circuit: &mut Circuit) {
             &mut false,
         );
         sum_terms(&mut constraint.left);
+        move_non_var_multiplications_to_right(&mut constraint.left, &mut constraint.right, true);
     }
 
     new_constraints.append(&mut constraints);
@@ -482,6 +483,93 @@ fn gen_var_name(vars: &HashSet<VarName>, var1: &VarName, var2: &VarName) -> VarN
     name
 }
 
+fn move_non_var_multiplications_to_right(mut left: &mut Expr, right: &mut Expr, is_positive: bool) {
+    match &mut left {
+        Expr::Add { left: l, right: r } => {
+            move_non_var_multiplications_to_right(l, right, is_positive);
+            move_non_var_multiplications_to_right(r, right, is_positive);
+            match (&**l, &**r) {
+                (Expr::Const(0.0), Expr::Const(0.0)) => {
+                    *left = Expr::Const(0.0);
+                }
+                (Expr::Const(0.0), _) => {
+                    *left = (**r).clone();
+                }
+                (_, Expr::Const(0.0)) => {
+                    *left = (**l).clone();
+                }
+                _ => {}
+            }
+        }
+        Expr::Sub { left: l, right: r } => {
+            move_non_var_multiplications_to_right(l, right, is_positive);
+            move_non_var_multiplications_to_right(r, right, !is_positive);
+            match (&**l, &**r) {
+                (Expr::Const(0.0), Expr::Const(0.0)) => {
+                    *left = Expr::Const(0.0);
+                }
+                (Expr::Const(0.0), _) => {
+                    *left = Expr::UnaryMinus((*r).clone());
+                }
+                (_, Expr::Const(0.0)) => {
+                    *left = (**l).clone();
+                }
+                _ => {}
+            }
+        }
+        Expr::Mul { left: l, right: r } => {
+            let mut found_vars = SortedVec::new();
+            let mut const_factor = if is_positive { 1.0 } else { -1.0 };
+            find_factors(l, &mut found_vars, &mut const_factor);
+            find_factors(r, &mut found_vars, &mut const_factor);
+
+            match found_vars.len() {
+                0 | 1 => {
+                    *right = if const_factor.is_sign_positive() {
+                        Expr::Sub {
+                            left: Box::new(right.clone()),
+                            right: Box::new(left.clone()),
+                        }
+                    } else {
+                        Expr::Add {
+                            left: Box::new(right.clone()),
+                            right: Box::new(left.clone()),
+                        }
+                    };
+                    *left = Expr::Const(0.0);
+                }
+                2 => {
+                    // Main case, leaving as is
+                }
+                _ => unreachable!(
+                    "should not have more than 2 variables in multiplication after packing"
+                ),
+            }
+        }
+        Expr::UnaryMinus(sub_expr) => {
+            move_non_var_multiplications_to_right(sub_expr, right, !is_positive);
+            if **sub_expr == Expr::Const(0.0) {
+                *left = Expr::Const(0.0);
+            }
+        }
+        Expr::Const(_) | Expr::Var(_) => {
+            *right = if is_positive {
+                Expr::Sub {
+                    left: Box::new(right.clone()),
+                    right: Box::new(left.clone()),
+                }
+            } else {
+                Expr::Add {
+                    left: Box::new(right.clone()),
+                    right: Box::new(left.clone()),
+                }
+            };
+
+            *left = Expr::Const(0.0);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use regex::Regex;
@@ -610,7 +698,6 @@ mod tests {
             &mut false,
         );
 
-        // (((-2 * (cb * a)) + dba) - (-db - (3 * d)))
         // (((-2 * (a * cb)) + adb) - (-db - (3 * d)))
         let regex = Regex::new(
             r"\(\(\(-2 \* \(a \* __c_b_\d+\)\) \+ __a___d_b_\d+_\d+\) - \(-__d_b_\d+ - \(3 \* d\)\)\)",
@@ -684,6 +771,66 @@ mod tests {
         };
 
         sum_terms(&mut expr);
-        assert_eq!(expr, expected, "Expected: {expected}, got: {expr}");
+        assert_eq!(expr, expected, "expected: {expected}, got: {expr}");
+    }
+
+    #[test]
+    fn test_move_non_var_multiplications_to_right_smoke() {
+        // a * (-b) * 2 + d - 3 * f + 4
+        let mut left = Expr::Add {
+            left: Box::new(Expr::Add {
+                left: Box::new(Expr::Mul {
+                    left: Box::new(Expr::Var("a".into())),
+                    right: Box::new(Expr::Mul {
+                        left: Box::new(Expr::UnaryMinus(Box::new(Expr::Var("b".into())))),
+                        right: Box::new(Expr::Const(2.0)),
+                    }),
+                }),
+                right: Box::new(Expr::Sub {
+                    left: Box::new(Expr::Var("d".into())),
+                    right: Box::new(Expr::Mul {
+                        left: Box::new(Expr::Const(3.0)),
+                        right: Box::new(Expr::Var("f".into())),
+                    }),
+                }),
+            }),
+            right: Box::new(Expr::Const(4.0)),
+        };
+        let mut right = Expr::Const(0.0);
+
+        // a * (-b) * 2
+        let expected_left = Expr::Mul {
+            left: Box::new(Expr::Var("a".into())),
+            right: Box::new(Expr::Mul {
+                left: Box::new(Expr::UnaryMinus(Box::new(Expr::Var("b".into())))),
+                right: Box::new(Expr::Const(2.0)),
+            }),
+        };
+
+        // 0 - d + 3 * f - 4
+        let expected_right = Expr::Sub {
+            left: Box::new(Expr::Add {
+                left: Box::new(Expr::Sub {
+                    left: Box::new(Expr::Const(0.0)),
+                    right: Box::new(Expr::Var("d".into())),
+                }),
+                right: Box::new(Expr::Mul {
+                    left: Box::new(Expr::Const(3.0)),
+                    right: Box::new(Expr::Var("f".into())),
+                }),
+            }),
+            right: Box::new(Expr::Const(4.0)),
+        };
+
+        move_non_var_multiplications_to_right(&mut left, &mut right, true);
+
+        assert_eq!(
+            left, expected_left,
+            "expected: {expected_left}, got: {left}"
+        );
+        assert_eq!(
+            right, expected_right,
+            "expected: {expected_right}, got: {right}"
+        );
     }
 }
