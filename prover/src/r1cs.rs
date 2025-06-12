@@ -6,19 +6,20 @@ use std::{
 };
 
 use circuit::{Circuit, Constraint, Expr, VarName};
+use ff::PrimeField;
 use logger::info;
 use sorted_vec::SortedVec;
 
-type Matrix = ndarray::Array2<f64>;
+type Matrix<F> = ndarray::Array2<F>;
 
 /// Rank One Constraint System.
 ///
 /// Contains L, R, and O (`La * Ra = Oa`, where `a` -- witness vector) matrices which have meaning
 /// only with the corresponding [`WitnessSchema`].
-pub struct R1cs {
-    left: Matrix,
-    right: Matrix,
-    output: Matrix,
+pub struct R1cs<F: PrimeField> {
+    left: Matrix<F>,
+    right: Matrix<F>,
+    output: Matrix<F>,
 }
 
 pub struct WitnessSchema {
@@ -26,14 +27,16 @@ pub struct WitnessSchema {
 }
 
 /// Derives a R1CS and witness schema from a given circuit.
-pub fn derive(mut circuit: Circuit) -> (R1cs, WitnessSchema) {
+pub fn derive<F: PrimeField + std::fmt::Display>(
+    mut circuit: Circuit<F>,
+) -> (R1cs<F>, WitnessSchema) {
     normalize(&mut circuit);
     info!(circuit = %circuit, "normalized circuit");
 
     todo!()
 }
 
-fn normalize(circuit: &mut Circuit) {
+fn normalize<F: PrimeField>(circuit: &mut Circuit<F>) {
     let mut constraints = std::mem::take(&mut circuit.constraints);
     let mut new_constraints = Vec::new();
     let mut new_var_names = HashSet::new();
@@ -57,16 +60,16 @@ fn normalize(circuit: &mut Circuit) {
     circuit.vars.extend(new_var_names);
 }
 
-fn move_right_to_left(left: &mut Expr, right: &mut Expr) {
-    let l = std::mem::replace(left, Expr::Const(0.0));
-    let r = std::mem::replace(right, Expr::Const(0.0));
+fn move_right_to_left<F: PrimeField>(left: &mut Expr<F>, right: &mut Expr<F>) {
+    let l = std::mem::replace(left, Expr::Const(F::ZERO));
+    let r = std::mem::replace(right, Expr::Const(F::ZERO));
     *left = Expr::Sub {
         left: Box::new(l),
         right: Box::new(r),
     };
 }
 
-fn reveal_brackets(expr: &mut Expr) {
+fn reveal_brackets<F: PrimeField>(expr: &mut Expr<F>) {
     match expr {
         Expr::Add { left, right } => {
             reveal_brackets(left);
@@ -224,10 +227,10 @@ fn reveal_brackets(expr: &mut Expr) {
 /// a*b*c = 0 => |
 ///              [ v*c = 0
 /// ```
-fn pack_var_multiplications(
+fn pack_var_multiplications<F: PrimeField>(
     var_names: &HashSet<VarName>,
-    expr: &mut Expr,
-    new_constraints: &mut Vec<Constraint>,
+    expr: &mut Expr<F>,
+    new_constraints: &mut Vec<Constraint<F>>,
     new_var_names: &mut HashSet<VarName>,
     var_multiplication_set: &mut bool,
 ) {
@@ -266,7 +269,7 @@ fn pack_var_multiplications(
         }
         Expr::Mul { left, right } => {
             let mut found_vars = SortedVec::new();
-            let mut const_factor = 1.0;
+            let mut const_factor = F::ONE;
             find_factors(left, &mut found_vars, &mut const_factor);
             find_factors(right, &mut found_vars, &mut const_factor);
 
@@ -335,13 +338,13 @@ fn pack_var_multiplications(
 }
 
 /// Sums terms in the expression, e.g. `2 * a + 3 * a - a` becomes `4 * a`.
-fn sum_terms(expr: &mut Expr) {
+fn sum_terms<F: PrimeField>(expr: &mut Expr<F>) {
     let mut terms = BTreeMap::new();
-    sum_terms_recursively(expr, &mut terms, 1);
+    sum_terms_recursively(expr, &mut terms, true);
 
     let mut new_expr = None;
     for (vars, const_factor) in terms {
-        if const_factor == 0.0 {
+        if const_factor == F::ZERO {
             continue;
         }
 
@@ -358,40 +361,46 @@ fn sum_terms(expr: &mut Expr) {
         }
     }
 
-    *expr = new_expr.unwrap_or(Expr::Const(0.0));
+    *expr = new_expr.unwrap_or(Expr::Const(F::ZERO));
 }
 
-fn sum_terms_recursively(expr: &Expr, terms: &mut BTreeMap<SortedVec<VarName>, f64>, sign: i8) {
+fn sum_terms_recursively<F: PrimeField>(
+    expr: &Expr<F>,
+    terms: &mut BTreeMap<SortedVec<VarName>, F>,
+    is_positive: bool,
+) {
     match expr {
         Expr::Add { left, right } => {
-            sum_terms_recursively(left, terms, sign);
-            sum_terms_recursively(right, terms, sign);
+            sum_terms_recursively(left, terms, is_positive);
+            sum_terms_recursively(right, terms, is_positive);
         }
         Expr::Sub { left, right } => {
-            sum_terms_recursively(left, terms, sign);
-            sum_terms_recursively(right, terms, -sign);
+            sum_terms_recursively(left, terms, is_positive);
+            sum_terms_recursively(right, terms, !is_positive);
         }
         Expr::Mul { left, right } => {
             let mut found_vars = SortedVec::new();
-            let mut const_factor = sign as f64;
+            let mut const_factor = if is_positive { F::ONE } else { -F::ONE };
             find_factors(left, &mut found_vars, &mut const_factor);
             find_factors(right, &mut found_vars, &mut const_factor);
 
             *terms.entry(found_vars).or_default() += const_factor;
         }
         Expr::UnaryMinus(sub_expr) => {
-            sum_terms_recursively(sub_expr, terms, -sign);
+            sum_terms_recursively(sub_expr, terms, !is_positive);
         }
         Expr::Var(var) => {
-            *terms.entry(SortedVec::from(vec![var.clone()])).or_default() += sign as f64;
+            let sign = if is_positive { F::ONE } else { -F::ONE };
+            *terms.entry(SortedVec::from(vec![var.clone()])).or_default() += sign;
         }
         Expr::Const(c) => {
-            *terms.entry(SortedVec::default()).or_default() += (sign as f64) * (*c);
+            let sign = if is_positive { F::ONE } else { -F::ONE };
+            *terms.entry(SortedVec::default()).or_default() += sign * (*c);
         }
     }
 }
 
-fn mul_vars(vars: &[VarName]) -> Option<Expr> {
+fn mul_vars<F: PrimeField>(vars: &[VarName]) -> Option<Expr<F>> {
     match vars.len() {
         0 => None,
         1 => Some(Expr::Var(vars[0].clone())),
@@ -402,22 +411,25 @@ fn mul_vars(vars: &[VarName]) -> Option<Expr> {
     }
 }
 
-fn mul_var_expr_and_const_factor(var_expr: Option<Expr>, const_factor: f64) -> Expr {
+fn mul_var_expr_and_const_factor<F: PrimeField>(
+    var_expr: Option<Expr<F>>,
+    const_factor: F,
+) -> Expr<F> {
     match (var_expr, const_factor) {
-        (_, 0.0) => {
+        (_, zero) if zero == F::ZERO => {
             // If the const is 0, we can just ignore this multiplication
-            Expr::Const(0.0)
+            Expr::Const(F::ZERO)
         }
         (None, c) => {
             // If there are no variables, we can just replace the multiplication with a
             // constant
             Expr::Const(c)
         }
-        (Some(var_expr), 1.0) => {
+        (Some(var_expr), one) if one == F::ONE => {
             // If the const is 1, we can just replace the multiplication with the variable
             var_expr
         }
-        (Some(var_expr), -1.0) => {
+        (Some(var_expr), minus_one) if minus_one == -F::ONE => {
             // If the const is -1, we can just replace the multiplication with the unary
             // minus of the variable
             Expr::UnaryMinus(Box::new(var_expr))
@@ -433,7 +445,11 @@ fn mul_var_expr_and_const_factor(var_expr: Option<Expr>, const_factor: f64) -> E
 }
 
 #[track_caller]
-fn find_factors(expr: &Expr, found_vars: &mut SortedVec<VarName>, const_factor: &mut f64) {
+fn find_factors<F: PrimeField>(
+    expr: &Expr<F>,
+    found_vars: &mut SortedVec<VarName>,
+    const_factor: &mut F,
+) {
     match expr {
         Expr::Mul { left, right } => {
             find_factors(left, found_vars, const_factor);
@@ -442,10 +458,10 @@ fn find_factors(expr: &Expr, found_vars: &mut SortedVec<VarName>, const_factor: 
         Expr::UnaryMinus(sub_expr) => match &**sub_expr {
             Expr::Var(var_name) => {
                 found_vars.push(var_name.clone());
-                *const_factor *= -1.0;
+                *const_factor = -(*const_factor);
             }
             Expr::Const(c) => {
-                *const_factor *= -c;
+                *const_factor *= -(*c);
             }
             _ => {
                 panic!(
@@ -483,19 +499,25 @@ fn gen_var_name(vars: &HashSet<VarName>, var1: &VarName, var2: &VarName) -> VarN
     name
 }
 
-fn move_non_var_multiplications_to_right(mut left: &mut Expr, right: &mut Expr, is_positive: bool) {
+fn move_non_var_multiplications_to_right<F: PrimeField>(
+    mut left: &mut Expr<F>,
+    right: &mut Expr<F>,
+    is_positive: bool,
+) {
     match &mut left {
         Expr::Add { left: l, right: r } => {
             move_non_var_multiplications_to_right(l, right, is_positive);
             move_non_var_multiplications_to_right(r, right, is_positive);
             match (&**l, &**r) {
-                (Expr::Const(0.0), Expr::Const(0.0)) => {
-                    *left = Expr::Const(0.0);
+                (Expr::Const(l_zero), Expr::Const(r_zero))
+                    if *l_zero == F::ZERO && *r_zero == F::ZERO =>
+                {
+                    *left = Expr::Const(F::ZERO);
                 }
-                (Expr::Const(0.0), _) => {
+                (Expr::Const(zero), _) if *zero == F::ZERO => {
                     *left = (**r).clone();
                 }
-                (_, Expr::Const(0.0)) => {
+                (_, Expr::Const(zero)) if *zero == F::ZERO => {
                     *left = (**l).clone();
                 }
                 _ => {}
@@ -505,13 +527,15 @@ fn move_non_var_multiplications_to_right(mut left: &mut Expr, right: &mut Expr, 
             move_non_var_multiplications_to_right(l, right, is_positive);
             move_non_var_multiplications_to_right(r, right, !is_positive);
             match (&**l, &**r) {
-                (Expr::Const(0.0), Expr::Const(0.0)) => {
-                    *left = Expr::Const(0.0);
+                (Expr::Const(l_zero), Expr::Const(r_zero))
+                    if *l_zero == F::ZERO && *r_zero == F::ZERO =>
+                {
+                    *left = Expr::Const(F::ZERO);
                 }
-                (Expr::Const(0.0), _) => {
+                (Expr::Const(zero), _) if *zero == F::ZERO => {
                     *left = Expr::UnaryMinus((*r).clone());
                 }
-                (_, Expr::Const(0.0)) => {
+                (_, Expr::Const(zero)) if *zero == F::ZERO => {
                     *left = (**l).clone();
                 }
                 _ => {}
@@ -519,24 +543,17 @@ fn move_non_var_multiplications_to_right(mut left: &mut Expr, right: &mut Expr, 
         }
         Expr::Mul { left: l, right: r } => {
             let mut found_vars = SortedVec::new();
-            let mut const_factor = if is_positive { 1.0 } else { -1.0 };
+            let mut const_factor = if is_positive { F::ONE } else { -F::ONE };
             find_factors(l, &mut found_vars, &mut const_factor);
             find_factors(r, &mut found_vars, &mut const_factor);
 
             match found_vars.len() {
                 0 | 1 => {
-                    *right = if const_factor.is_sign_positive() {
-                        Expr::Sub {
-                            left: Box::new(right.clone()),
-                            right: Box::new(left.clone()),
-                        }
-                    } else {
-                        Expr::Add {
-                            left: Box::new(right.clone()),
-                            right: Box::new(left.clone()),
-                        }
+                    *right = Expr::Add {
+                        left: Box::new(right.clone()),
+                        right: Box::new(left.clone()),
                     };
-                    *left = Expr::Const(0.0);
+                    *left = Expr::Const(F::ZERO);
                 }
                 2 => {
                     // Main case, leaving as is
@@ -548,30 +565,41 @@ fn move_non_var_multiplications_to_right(mut left: &mut Expr, right: &mut Expr, 
         }
         Expr::UnaryMinus(sub_expr) => {
             move_non_var_multiplications_to_right(sub_expr, right, !is_positive);
-            if **sub_expr == Expr::Const(0.0) {
-                *left = Expr::Const(0.0);
+            if **sub_expr == Expr::Const(F::ZERO) {
+                *left = Expr::Const(F::ZERO);
             }
         }
         Expr::Const(_) | Expr::Var(_) => {
-            *right = if is_positive {
-                Expr::Sub {
-                    left: Box::new(right.clone()),
-                    right: Box::new(left.clone()),
+            match (&*right, is_positive) {
+                (Expr::Const(zero), true) if *zero == F::ZERO => {
+                    *right = Expr::UnaryMinus(Box::new(left.clone()));
                 }
-            } else {
-                Expr::Add {
-                    left: Box::new(right.clone()),
-                    right: Box::new(left.clone()),
+                (Expr::Const(zero), false) if *zero == F::ZERO => {
+                    *right = left.clone();
                 }
-            };
+                (_, true) => {
+                    *right = Expr::Sub {
+                        left: Box::new(right.clone()),
+                        right: Box::new(left.clone()),
+                    };
+                }
+                (_, false) => {
+                    *right = Expr::Add {
+                        left: Box::new(right.clone()),
+                        right: Box::new(left.clone()),
+                    };
+                }
+            }
 
-            *left = Expr::Const(0.0);
+            *left = Expr::Const(F::ZERO);
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use bls12_381::Scalar;
+    use ff::Field as _;
     use regex::Regex;
 
     use super::*;
@@ -579,7 +607,7 @@ mod tests {
     #[test]
     fn test_reveal_brackets_smoke() {
         // (-a + b * c) * (d - (e + f)) - g
-        let mut expr = Expr::Sub {
+        let mut expr = Expr::<Scalar>::Sub {
             left: Box::new(Expr::Mul {
                 left: Box::new(Expr::Add {
                     left: Box::new(Expr::UnaryMinus(Box::new(Expr::Var("a".into())))),
@@ -656,10 +684,10 @@ mod tests {
     fn test_pack_var_multiplications_smoke() {
         let var_names = HashSet::from_iter(["a".into(), "b".into(), "c".into(), "d".into()]);
         // (((-2 * (a * (b * c))) + (a * (b * d))) - ((-b * d) - (3 * d)))
-        let mut expr = Expr::Sub {
+        let mut expr = Expr::<Scalar>::Sub {
             left: Box::new(Expr::Add {
                 left: Box::new(Expr::Mul {
-                    left: Box::new(Expr::Const(-2.0)),
+                    left: Box::new(Expr::Const(-Scalar::from(2))),
                     right: Box::new(Expr::Mul {
                         left: Box::new(Expr::Var("a".into())),
                         right: Box::new(Expr::Mul {
@@ -682,7 +710,7 @@ mod tests {
                     right: Box::new(Expr::Var("d".into())),
                 }),
                 right: Box::new(Expr::Mul {
-                    left: Box::new(Expr::Const(3.0)),
+                    left: Box::new(Expr::Const(Scalar::from(3))),
                     right: Box::new(Expr::Var("d".into())),
                 }),
             }),
@@ -700,7 +728,11 @@ mod tests {
 
         // (((-2 * (a * cb)) + adb) - (-db - (3 * d)))
         let regex = Regex::new(
-            r"\(\(\(-2 \* \(a \* __c_b_\d+\)\) \+ __a___d_b_\d+_\d+\) - \(-__d_b_\d+ - \(3 \* d\)\)\)",
+            &format!(
+                r"\(\(\({} \* \(a \* __c_b_\d+\)\) \+ __a___d_b_\d+_\d+\) - \(-__d_b_\d+ - \({} \* d\)\)\)",
+                -Scalar::from(2),
+                Scalar::from(3),
+            ),
         )
         .unwrap();
         let expr = expr.to_string();
@@ -711,9 +743,9 @@ mod tests {
     #[test]
     fn test_sum_terms_smoke() {
         // 2 * a * b * c + a * 3 * b * c - a * a * b * c
-        let mut expr = Expr::Add {
+        let mut expr = Expr::<Scalar>::Add {
             left: Box::new(Expr::Mul {
-                left: Box::new(Expr::Const(2.0)),
+                left: Box::new(Expr::Const(Scalar::from(2))),
                 right: Box::new(Expr::Mul {
                     left: Box::new(Expr::Var("a".into())),
                     right: Box::new(Expr::Mul {
@@ -726,7 +758,7 @@ mod tests {
                 left: Box::new(Expr::Mul {
                     left: Box::new(Expr::Var("a".into())),
                     right: Box::new(Expr::Mul {
-                        left: Box::new(Expr::Const(3.0)),
+                        left: Box::new(Expr::Const(Scalar::from(3))),
                         right: Box::new(Expr::Mul {
                             left: Box::new(Expr::Var("b".into())),
                             right: Box::new(Expr::Var("c".into())),
@@ -747,7 +779,7 @@ mod tests {
         };
 
         // - a * a * b * c + 5 * a * b * c
-        let expected = Expr::Add {
+        let expected = Expr::<Scalar>::Add {
             left: Box::new(Expr::UnaryMinus(Box::new(Expr::Mul {
                 left: Box::new(Expr::Var("a".into())),
                 right: Box::new(Expr::Mul {
@@ -759,7 +791,7 @@ mod tests {
                 }),
             }))),
             right: Box::new(Expr::Mul {
-                left: Box::new(Expr::Const(5.0)),
+                left: Box::new(Expr::Const(Scalar::from(5))),
                 right: Box::new(Expr::Mul {
                     left: Box::new(Expr::Var("a".into())),
                     right: Box::new(Expr::Mul {
@@ -777,49 +809,49 @@ mod tests {
     #[test]
     fn test_move_non_var_multiplications_to_right_smoke() {
         // a * (-b) * 2 + d - 3 * f + 4
-        let mut left = Expr::Add {
+        let mut left = Expr::<Scalar>::Add {
             left: Box::new(Expr::Add {
                 left: Box::new(Expr::Mul {
                     left: Box::new(Expr::Var("a".into())),
                     right: Box::new(Expr::Mul {
                         left: Box::new(Expr::UnaryMinus(Box::new(Expr::Var("b".into())))),
-                        right: Box::new(Expr::Const(2.0)),
+                        right: Box::new(Expr::Const(Scalar::from(2))),
                     }),
                 }),
                 right: Box::new(Expr::Sub {
                     left: Box::new(Expr::Var("d".into())),
                     right: Box::new(Expr::Mul {
-                        left: Box::new(Expr::Const(3.0)),
+                        left: Box::new(Expr::Const(Scalar::from(3))),
                         right: Box::new(Expr::Var("f".into())),
                     }),
                 }),
             }),
-            right: Box::new(Expr::Const(4.0)),
+            right: Box::new(Expr::Const(Scalar::from(4))),
         };
-        let mut right = Expr::Const(0.0);
+        let mut right = Expr::Const(Scalar::ZERO);
 
         // a * (-b) * 2
-        let expected_left = Expr::Mul {
+        let expected_left = Expr::<Scalar>::Mul {
             left: Box::new(Expr::Var("a".into())),
             right: Box::new(Expr::Mul {
                 left: Box::new(Expr::UnaryMinus(Box::new(Expr::Var("b".into())))),
-                right: Box::new(Expr::Const(2.0)),
+                right: Box::new(Expr::Const(Scalar::from(2))),
             }),
         };
 
         // 0 - d + 3 * f - 4
-        let expected_right = Expr::Sub {
+        let expected_right = Expr::<Scalar>::Sub {
             left: Box::new(Expr::Add {
                 left: Box::new(Expr::Sub {
-                    left: Box::new(Expr::Const(0.0)),
+                    left: Box::new(Expr::Const(Scalar::ZERO)),
                     right: Box::new(Expr::Var("d".into())),
                 }),
                 right: Box::new(Expr::Mul {
-                    left: Box::new(Expr::Const(3.0)),
+                    left: Box::new(Expr::Const(Scalar::from(3))),
                     right: Box::new(Expr::Var("f".into())),
                 }),
             }),
-            right: Box::new(Expr::Const(4.0)),
+            right: Box::new(Expr::Const(Scalar::from(4))),
         };
 
         move_non_var_multiplications_to_right(&mut left, &mut right, true);

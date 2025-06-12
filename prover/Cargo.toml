@@ -11,6 +11,8 @@ logger.workspace = true
 
 tokio.workspace = true
 eyre.workspace = true
+bls12_381.workspace = true
+ff.workspace = true
 ndarray = "0.16.1"
 ahash = "0.8.12"
 sorted-vec = "0.8.6"

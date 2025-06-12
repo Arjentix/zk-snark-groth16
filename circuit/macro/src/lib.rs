@@ -125,17 +125,10 @@ fn recursively_transform_expression(
             lit: syn::Lit::Int(lit),
             ..
         }) => {
-            // Won't compile on caller-site, but the error message looks good
             quote! {
-                ::circuit::Expr::Const(#lit)
+                ::circuit::Expr::Const(#lit.into())
             }
         }
-        syn::Expr::Lit(syn::ExprLit {
-            lit: syn::Lit::Float(lit),
-            ..
-        }) => quote! {
-            ::circuit::Expr::Const(#lit)
-        },
         syn::Expr::Path(syn::ExprPath { path, .. }) => {
             vars.insert(path.to_token_stream().to_string());
             quote! {
@@ -145,9 +138,12 @@ fn recursively_transform_expression(
         syn::Expr::Paren(syn::ExprParen { expr, .. }) => {
             recursively_transform_expression(expr, vars)
         }
-        _ => abort!(
-            expr,
-            "unsupported expression. Allowed literals, parentheses and operations: +, -, *, /."
-        ),
+        _ => {
+            println!("expr: {expr:?}");
+            abort!(
+                expr,
+                "unsupported expression. Allowed literals, parentheses and operations: +, -, *, /."
+            )
+        }
     }
 }

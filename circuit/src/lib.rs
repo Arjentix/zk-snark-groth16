@@ -4,18 +4,19 @@ use std::{borrow::Cow, collections::HashSet};
 
 pub use circuit_macro::circuit;
 use derive_more::Display;
+use ff::PrimeField;
 use itertools::Itertools as _;
 
 pub type VarName = Cow<'static, str>;
 
 /// Arithmetic circuit.
 #[derive(Default, Debug)]
-pub struct Circuit {
+pub struct Circuit<F: PrimeField> {
     pub vars: HashSet<VarName>,
-    pub constraints: Vec<Constraint>,
+    pub constraints: Vec<Constraint<F>>,
 }
 
-impl Circuit {
+impl<F: PrimeField> Circuit<F> {
     /// Create a new circuit.
     pub fn new() -> Self {
         Self {
@@ -25,7 +26,7 @@ impl Circuit {
     }
 }
 
-impl std::fmt::Display for Circuit {
+impl<F: PrimeField + std::fmt::Display> std::fmt::Display for Circuit<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.constraints
             .iter()
@@ -37,24 +38,33 @@ impl std::fmt::Display for Circuit {
 
 #[derive(Debug, Display)]
 #[display("{left} == {right}")]
-pub struct Constraint {
-    pub left: Expr,
-    pub right: Expr,
+pub struct Constraint<F: PrimeField> {
+    pub left: Expr<F>,
+    pub right: Expr<F>,
 }
 
 /// Expression in the circuit.
 /// Note that division is not supported.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Expr {
-    Add { left: Box<Expr>, right: Box<Expr> },
-    Sub { left: Box<Expr>, right: Box<Expr> },
-    Mul { left: Box<Expr>, right: Box<Expr> },
-    UnaryMinus(Box<Expr>),
-    Const(f64),
+pub enum Expr<F: PrimeField> {
+    Add {
+        left: Box<Expr<F>>,
+        right: Box<Expr<F>>,
+    },
+    Sub {
+        left: Box<Expr<F>>,
+        right: Box<Expr<F>>,
+    },
+    Mul {
+        left: Box<Expr<F>>,
+        right: Box<Expr<F>>,
+    },
+    UnaryMinus(Box<Expr<F>>),
+    Const(F),
     Var(VarName),
 }
 
-impl std::fmt::Display for Expr {
+impl<F: PrimeField + std::fmt::Display> std::fmt::Display for Expr<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Expr::Add { left, right } => write!(f, "({left} + {right})"),

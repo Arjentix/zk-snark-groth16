@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use circuit::circuit;
+use circuit::{Circuit, circuit};
 use eyre::{Context as _, Result};
 use logger::info;
 use network::Network;
@@ -21,9 +21,9 @@ async fn main() -> Result<()> {
     .await
     .wrap_err("failed to establish network")?;
 
-    let circuit = circuit! {
-        -3.0*x*x*y + 5.0*x*y - (x - 2.0)*y + 3.0 == a;
-        2.0*x + y == b - 5.0;
+    let circuit: Circuit<bls12_381::Scalar> = circuit! {
+        -3*x*x*y + 5*x*y - (x - 2)*y + 3 == a;
+        2*x + y == b - 5;
     };
     info!(circuit = %circuit, "input circuit");
     let (r1cs, _witness_schema) = r1cs::derive(circuit);
