@@ -1,12 +1,13 @@
 //! Rank One Constraint System (R1CS) utilities.
 
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::BTreeMap,
     hash::{BuildHasher as _, Hash as _, Hasher as _},
 };
 
-use circuit::{Circuit, Constraint, Expr, VarName};
+use circuit::{Circuit, Constraint, Expr, ScopedVar, VarName};
 use ff::PrimeField;
+use indexmap::IndexSet;
 use logger::info;
 use sorted_vec::SortedVec;
 
@@ -39,7 +40,7 @@ pub fn derive<F: PrimeField + std::fmt::Display>(
 fn normalize<F: PrimeField>(circuit: &mut Circuit<F>) {
     let mut constraints = std::mem::take(&mut circuit.constraints);
     let mut new_constraints = Vec::new();
-    let mut new_var_names = HashSet::new();
+    let mut new_var_names = IndexSet::new();
 
     for constraint in &mut constraints {
         move_right_to_left(&mut constraint.left, &mut constraint.right);
@@ -57,7 +58,9 @@ fn normalize<F: PrimeField>(circuit: &mut Circuit<F>) {
 
     new_constraints.append(&mut constraints);
     circuit.constraints = new_constraints;
-    circuit.vars.extend(new_var_names);
+    circuit
+        .vars
+        .extend(new_var_names.into_iter().map(ScopedVar::Private));
 }
 
 fn move_right_to_left<F: PrimeField>(left: &mut Expr<F>, right: &mut Expr<F>) {
@@ -228,10 +231,10 @@ fn reveal_brackets<F: PrimeField>(expr: &mut Expr<F>) {
 ///              [ v*c = 0
 /// ```
 fn pack_var_multiplications<F: PrimeField>(
-    var_names: &HashSet<VarName>,
+    var_names: &IndexSet<ScopedVar>,
     expr: &mut Expr<F>,
     new_constraints: &mut Vec<Constraint<F>>,
-    new_var_names: &mut HashSet<VarName>,
+    new_var_names: &mut IndexSet<VarName>,
     var_multiplication_set: &mut bool,
 ) {
     match expr {
@@ -483,7 +486,7 @@ fn find_factors<F: PrimeField>(
     }
 }
 
-fn gen_var_name(vars: &HashSet<VarName>, var1: &VarName, var2: &VarName) -> VarName {
+fn gen_var_name(vars: &IndexSet<ScopedVar>, var1: &VarName, var2: &VarName) -> VarName {
     // Using hash of all user-provided variables to avoid theoretical collisions
     let mut hasher = ahash::RandomState::with_seed(5555).build_hasher();
     for var in vars.iter() {
@@ -492,7 +495,9 @@ fn gen_var_name(vars: &HashSet<VarName>, var1: &VarName, var2: &VarName) -> VarN
     let hash = hasher.finish();
 
     let name: VarName = format!("__{var1}_{var2}_{hash}").into();
-    if vars.contains(&name) {
+    if vars.contains(&ScopedVar::Private(name.clone()))
+        || vars.contains(&ScopedVar::Public(name.clone()))
+    {
         panic!("converting to R1CS generated a duplicated variable name, this should never happen");
     }
 
@@ -549,7 +554,7 @@ fn move_non_var_multiplications_to_right<F: PrimeField>(
 
             match found_vars.len() {
                 0 | 1 => {
-                    *right = Expr::Add {
+                    *right = Expr::Sub {
                         left: Box::new(right.clone()),
                         right: Box::new(left.clone()),
                     };
@@ -682,7 +687,12 @@ mod tests {
 
     #[test]
     fn test_pack_var_multiplications_smoke() {
-        let var_names = HashSet::from_iter(["a".into(), "b".into(), "c".into(), "d".into()]);
+        let var_names = IndexSet::from_iter([
+            ScopedVar::Public("a".into()),
+            ScopedVar::Private("b".into()),
+            ScopedVar::Private("c".into()),
+            ScopedVar::Private("d".into()),
+        ]);
         // (((-2 * (a * (b * c))) + (a * (b * d))) - ((-b * d) - (3 * d)))
         let mut expr = Expr::<Scalar>::Sub {
             left: Box::new(Expr::Add {
@@ -716,7 +726,7 @@ mod tests {
             }),
         };
         let mut new_constraints = Vec::new();
-        let mut new_var_names = HashSet::new();
+        let mut new_var_names = IndexSet::new();
 
         pack_var_multiplications(
             &var_names,
@@ -839,13 +849,10 @@ mod tests {
             }),
         };
 
-        // 0 - d + 3 * f - 4
+        // (-d) + 3 * f - 4
         let expected_right = Expr::<Scalar>::Sub {
             left: Box::new(Expr::Add {
-                left: Box::new(Expr::Sub {
-                    left: Box::new(Expr::Const(Scalar::ZERO)),
-                    right: Box::new(Expr::Var("d".into())),
-                }),
+                left: Box::new(Expr::UnaryMinus(Box::new(Expr::Var("d".into())))),
                 right: Box::new(Expr::Mul {
                     left: Box::new(Expr::Const(Scalar::from(3))),
                     right: Box::new(Expr::Var("f".into())),

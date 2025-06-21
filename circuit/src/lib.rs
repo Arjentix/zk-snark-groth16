@@ -1,10 +1,11 @@
 //! Arithmetic circuit utilities.
 
-use std::{borrow::Cow, collections::HashSet};
+use std::borrow::Cow;
 
 pub use circuit_macro::circuit;
 use derive_more::Display;
 use ff::PrimeField;
+use indexmap::IndexSet;
 use itertools::Itertools as _;
 
 pub type VarName = Cow<'static, str>;
@@ -12,18 +13,8 @@ pub type VarName = Cow<'static, str>;
 /// Arithmetic circuit.
 #[derive(Default, Debug)]
 pub struct Circuit<F: PrimeField> {
-    pub vars: HashSet<VarName>,
+    pub vars: IndexSet<ScopedVar>,
     pub constraints: Vec<Constraint<F>>,
-}
-
-impl<F: PrimeField> Circuit<F> {
-    /// Create a new circuit.
-    pub fn new() -> Self {
-        Self {
-            vars: HashSet::new(),
-            constraints: Vec::new(),
-        }
-    }
 }
 
 impl<F: PrimeField + std::fmt::Display> std::fmt::Display for Circuit<F> {
@@ -33,6 +24,24 @@ impl<F: PrimeField + std::fmt::Display> std::fmt::Display for Circuit<F> {
             .format_with("\n", |c, f| f(&format_args!("{c}")))
             .fmt(f)?;
         Ok(())
+    }
+}
+
+/// Public or private variable in the circuit.
+#[derive(Debug, Hash, PartialEq, Eq)]
+pub enum ScopedVar {
+    /// Public variable which won't be hidden in the proof.
+    Public(VarName),
+    /// Private variable which will be hidden in the proof.
+    Private(VarName),
+}
+
+impl ScopedVar {
+    /// Returns the name of the variable.
+    pub fn name(&self) -> &VarName {
+        match self {
+            ScopedVar::Public(name) | ScopedVar::Private(name) => name,
+        }
     }
 }
 

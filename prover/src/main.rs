@@ -21,10 +21,10 @@ async fn main() -> Result<()> {
     .await
     .wrap_err("failed to establish network")?;
 
-    let circuit: Circuit<bls12_381::Scalar> = circuit! {
+    let circuit: Circuit<bls12_381::Scalar> = circuit!(|pub a, pub b, x, y| {
         -3*x*x*y + 5*x*y - (x - 2)*y + 3 == a;
         2*x + y == b - 5;
-    };
+    });
     info!(circuit = %circuit, "input circuit");
     let (r1cs, _witness_schema) = r1cs::derive(circuit);
     let _qap = Qap::from(r1cs);
