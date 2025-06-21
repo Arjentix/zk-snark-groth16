@@ -13,6 +13,7 @@ pub type VarName = Cow<'static, str>;
 /// Arithmetic circuit.
 #[derive(Default, Debug)]
 pub struct Circuit<F: PrimeField> {
+    /// Variables where all public variables go first.
     pub vars: IndexSet<ScopedVar>,
     pub constraints: Vec<Constraint<F>>,
 }
@@ -28,7 +29,7 @@ impl<F: PrimeField + std::fmt::Display> std::fmt::Display for Circuit<F> {
 }
 
 /// Public or private variable in the circuit.
-#[derive(Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum ScopedVar {
     /// Public variable which won't be hidden in the proof.
     Public(VarName),

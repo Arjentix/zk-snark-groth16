@@ -8,5 +8,5 @@ ff.workspace = true
 
 circuit_macro = { path = "macro" }
 derive_more = { version = "2.0.1", features = ["display"] }
-itertools = "0.14.0"
+itertools.workspace = true
 indexmap.workspace = true
