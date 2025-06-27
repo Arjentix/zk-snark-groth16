@@ -1,11 +1,13 @@
 //! Rank One Constraint System (R1CS) utilities.
 
-use circuit::{Circuit, Constraint, ScopedVar, VarName};
+use circuit::{Circuit, ScopedVar, VarName};
 use derive_more::Display;
 use ff::PrimeField;
 use indexmap::IndexSet;
 use itertools::Itertools as _;
 use logger::info;
+
+use crate::r1cs::normalization::{NormalizedCircuit, NormalizedConstraint};
 
 mod normalization;
 
@@ -32,9 +34,9 @@ pub struct WitnessSchema<F: PrimeField> {
 
 /// Derives a R1CS and witness schema from a given circuit.
 pub fn derive<F: PrimeField + std::fmt::Display>(
-    mut circuit: Circuit<F>,
+    circuit: Circuit<F>,
 ) -> (R1cs<F>, WitnessSchema<F>) {
-    normalization::normalize(&mut circuit);
+    let circuit = NormalizedCircuit::from(circuit);
     info!(circuit = %circuit, "normalized circuit");
 
     let schema = WitnessSchema::from_circuit_vars(circuit.vars);
@@ -104,7 +106,7 @@ impl<F: PrimeField + std::fmt::Display> std::fmt::Display for WitnessSchema<F> {
 }
 
 fn derive_from_normalized<F: PrimeField>(
-    constraints: &[Constraint<F>],
+    constraints: &[NormalizedConstraint<F>],
     schema: &WitnessSchema<F>,
 ) -> R1cs<F> {
     let schema_len = schema.len();

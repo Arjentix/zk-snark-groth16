@@ -77,12 +77,12 @@ pub enum Expr<F: PrimeField> {
 impl<F: PrimeField + std::fmt::Display> std::fmt::Display for Expr<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Expr::Add { left, right } => write!(f, "({left} + {right})"),
-            Expr::Sub { left, right } => write!(f, "({left} - {right})"),
-            Expr::Mul { left, right } => write!(f, "({left} * {right})"),
-            Expr::UnaryMinus(expr) => write!(f, "-{expr}"),
-            Expr::Const(value) => write!(f, "{value}"),
-            Expr::Var(name) => write!(f, "{name}"),
+            Self::Add { left, right } => write!(f, "({left} + {right})"),
+            Self::Sub { left, right } => write!(f, "({left} - {right})"),
+            Self::Mul { left, right } => write!(f, "({left} * {right})"),
+            Self::UnaryMinus(expr) => write!(f, "-{expr}"),
+            Self::Const(value) => write!(f, "{value}"),
+            Self::Var(name) => write!(f, "{name}"),
         }
     }
 }
