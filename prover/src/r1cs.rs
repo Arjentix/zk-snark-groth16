@@ -6,8 +6,9 @@ use ff::PrimeField;
 use indexmap::IndexSet;
 use itertools::Itertools as _;
 use logger::info;
+use normalization::{LeftExpr, NormalizedCircuit, NormalizedConstraint};
 
-use crate::r1cs::normalization::{NormalizedCircuit, NormalizedConstraint};
+use crate::r1cs::normalization::RightExpr;
 
 mod normalization;
 
@@ -36,7 +37,7 @@ pub struct WitnessSchema<F: PrimeField> {
 pub fn derive<F: PrimeField + std::fmt::Display>(
     circuit: Circuit<F>,
 ) -> (R1cs<F>, WitnessSchema<F>) {
-    let circuit = NormalizedCircuit::from(circuit);
+    let circuit = NormalizedCircuit::normalize(circuit);
     info!(circuit = %circuit, "normalized circuit");
 
     let schema = WitnessSchema::from_circuit_vars(circuit.vars);
@@ -119,7 +120,26 @@ fn derive_from_normalized<F: PrimeField>(
     };
 
     constraints.iter().fold(zeroed, |mut r1cs, constraint| {
-        todo!();
+        fill_l_r_matrices(&constraint.left, schema, &mut r1cs.left, &mut r1cs.right);
+        fill_o_matrix_recursively(&constraint.right, schema, true, &mut r1cs.output);
         r1cs
     })
+}
+
+fn fill_l_r_matrices<F: PrimeField>(
+    expr: &LeftExpr<F>,
+    schema: &WitnessSchema<F>,
+    left: &mut Matrix<F>,
+    right: &mut Matrix<F>,
+) {
+    todo!()
+}
+
+fn fill_o_matrix_recursively<F: PrimeField>(
+    expr: &RightExpr<F>,
+    schema: &WitnessSchema<F>,
+    is_positive: bool,
+    output: &mut Matrix<F>,
+) {
+    todo!()
 }
