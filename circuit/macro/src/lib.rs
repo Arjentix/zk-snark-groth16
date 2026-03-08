@@ -197,7 +197,7 @@ fn recursively_transform_expression(expr: Box<syn::Expr>) -> TokenStream2 {
             println!("expr: {expr:?}");
             abort!(
                 expr,
-                "unsupported expression. Allowed literals, parentheses and operations: +, -, *, /."
+                "unsupported expression. Allowed literals, parentheses and operations: +, -, *."
             )
         }
     }
