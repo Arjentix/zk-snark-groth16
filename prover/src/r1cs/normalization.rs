@@ -118,9 +118,9 @@ type MaybeTwoVarMul<F> = VarMul<F, MaybeVarName>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct VarMul<F: PrimeField, R> {
-    scalar: F,
-    left: VarName,
-    right: R,
+    pub scalar: F,
+    pub left: VarName,
+    pub right: R,
 }
 
 impl<F: PrimeField> VarMul<F, MaybeVarName> {

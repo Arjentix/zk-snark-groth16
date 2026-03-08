@@ -13,10 +13,11 @@ use crate::r1cs::normalization::RightExpr;
 mod normalization;
 
 type Matrix<F> = ndarray::Array2<F>;
+type Row<F> = ndarray::Array1<F>;
 
 /// Rank One Constraint System.
 ///
-/// Contains L, R, and O (`La * Ra = Oa`, where `a` -- witness vector) matrices which have meaning
+/// Contains L, R, and O matrices (`La * Ra = Oa`, where `a` -- witness vector) which have meaning
 /// only with the corresponding [`WitnessSchema`].
 #[derive(Debug, Display)]
 #[display("L: {left},\nR: {right},\nO: {output}")]
@@ -28,9 +29,9 @@ pub struct R1cs<F: PrimeField> {
 
 pub struct WitnessSchema<F: PrimeField> {
     /// Scalar multiplier always equal to 1.
-    pub one: F,
+    one: F,
     /// Schema variables where all public variables go first.
-    pub vars: IndexSet<ScopedVar>,
+    vars: IndexSet<ScopedVar>,
 }
 
 /// Derives a R1CS and witness schema from a given circuit.
@@ -76,12 +77,13 @@ impl<F: PrimeField> WitnessSchema<F> {
     }
 
     /// Returns the index of the variable in the schema.
-    fn index_of(&self, var: Option<&VarName>) -> Option<usize> {
+    fn index_of(&self, elem: ScalarOrVarName<'_>) -> Option<usize> {
         // Technically could be faster with a hashmap, but this is simpler and
         // the number of variables is usually very small.
 
-        let Some(var) = var else {
-            return Some(0); // 0 is the index of the scalar multiplier
+        let var = match elem {
+            ScalarOrVarName::Scalar => return Some(0),
+            ScalarOrVarName::VarName(var) => var,
         };
 
         self.vars
@@ -106,40 +108,118 @@ impl<F: PrimeField + std::fmt::Display> std::fmt::Display for WitnessSchema<F> {
     }
 }
 
+enum ScalarOrVarName<'name> {
+    Scalar,
+    VarName(&'name VarName),
+}
+
 fn derive_from_normalized<F: PrimeField>(
     constraints: &[NormalizedConstraint<F>],
     schema: &WitnessSchema<F>,
 ) -> R1cs<F> {
     let schema_len = schema.len();
     let constraints_count = constraints.len();
+    let shape = (constraints_count, schema_len);
 
-    let zeroed = R1cs {
-        left: Matrix::from_elem((constraints_count, schema_len), F::ZERO),
-        right: Matrix::from_elem((constraints_count, schema_len), F::ZERO),
-        output: Matrix::from_elem((constraints_count, schema_len), F::ZERO),
+    let empty = R1cs {
+        left: Matrix::default(shape),
+        right: Matrix::default(shape),
+        output: Matrix::default(shape),
     };
 
-    constraints.iter().fold(zeroed, |mut r1cs, constraint| {
-        fill_l_r_matrices(&constraint.left, schema, &mut r1cs.left, &mut r1cs.right);
-        fill_o_matrix_recursively(&constraint.right, schema, true, &mut r1cs.output);
+    constraints.iter().fold(empty, |mut r1cs, constraint| {
+        let (left_row, right_row) = produce_l_r_rows(&constraint.left, schema);
+        r1cs.left
+            .push_row(left_row.view())
+            .expect("L matrix row length doesn't match L matrix expectation, this is a bug");
+        r1cs.right
+            .push_row(right_row.view())
+            .expect("R matrix row length doesn't match R matrix expectation, this is a bug");
+
+        let o_row = produce_o_row(&constraint.right, schema);
+        r1cs.output
+            .push_row(o_row.view())
+            .expect("O matrix row length doesn't match O matrix expectation, this is a bug");
+
         r1cs
     })
 }
 
-fn fill_l_r_matrices<F: PrimeField>(
+fn produce_l_r_rows<F: PrimeField>(
     expr: &LeftExpr<F>,
     schema: &WitnessSchema<F>,
-    left: &mut Matrix<F>,
-    right: &mut Matrix<F>,
-) {
-    todo!()
+) -> (Row<F>, Row<F>) {
+    let shape = schema.len();
+
+    let mut left = Row::from_elem(shape, F::ZERO);
+    let mut right = Row::from_elem(shape, F::ZERO);
+
+    let var_mul = match expr {
+        LeftExpr::Mul(var_mul) => var_mul,
+        LeftExpr::Zero => return (left, right),
+    };
+
+    let index_of_left_var = schema
+        .index_of(ScalarOrVarName::VarName(&var_mul.left))
+        .unwrap_or_else(|| {
+            panic!(
+                "failed to get witness schema index of `{}` variable, this is a bug",
+                var_mul.left
+            )
+        });
+    left[index_of_left_var] = var_mul.scalar;
+
+    let index_of_right_var = schema
+        .index_of(ScalarOrVarName::VarName(&var_mul.right))
+        .unwrap_or_else(|| {
+            panic!(
+                "failed to get witness schema index of `{}` variable, this is a bug",
+                var_mul.right
+            )
+        });
+    right[index_of_right_var] = F::ONE;
+
+    (left, right)
 }
 
-fn fill_o_matrix_recursively<F: PrimeField>(
-    expr: &RightExpr<F>,
-    schema: &WitnessSchema<F>,
-    is_positive: bool,
-    output: &mut Matrix<F>,
-) {
-    todo!()
+fn produce_o_row<F: PrimeField>(expr: &RightExpr<F>, schema: &WitnessSchema<F>) -> Row<F> {
+    todo!();
+}
+
+#[cfg(test)]
+mod tests {
+    use bls12_381::Scalar;
+    use ff::Field;
+
+    use super::*;
+    use crate::r1cs::normalization::VarMul;
+
+    #[test]
+    fn test_produce_l_r_rows_smoke() {
+        let expr = LeftExpr::Mul(VarMul {
+            scalar: Scalar::from(5),
+            left: "a".into(),
+            right: "b".into(),
+        });
+        let schema = WitnessSchema::from_circuit_vars(
+            [
+                ScopedVar::Private("a".into()),
+                ScopedVar::Private("b".into()),
+            ]
+            .into(),
+        );
+
+        let expected_left = Row::from_iter([Scalar::ZERO, Scalar::from(5), Scalar::ZERO]);
+        let expected_right = Row::from_iter([Scalar::ZERO, Scalar::ZERO, Scalar::ONE]);
+
+        let (left_row, right_row) = produce_l_r_rows(&expr, &schema);
+        assert_eq!(
+            left_row, expected_left,
+            "expected: {expected_left}, got: {left_row}"
+        );
+        assert_eq!(
+            right_row, expected_right,
+            "expected: {expected_right}, got: {right_row}"
+        );
+    }
 }
