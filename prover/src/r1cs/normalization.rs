@@ -113,6 +113,7 @@ impl From<MaybeVarName> for Option<VarName> {
     }
 }
 
+pub type OneVarMul<F> = VarMul<F, Nothing>;
 pub type TwoVarMul<F> = VarMul<F, VarName>;
 type MaybeTwoVarMul<F> = VarMul<F, MaybeVarName>;
 

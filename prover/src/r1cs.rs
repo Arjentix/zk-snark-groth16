@@ -183,7 +183,89 @@ fn produce_l_r_rows<F: PrimeField>(
 }
 
 fn produce_o_row<F: PrimeField>(expr: &RightExpr<F>, schema: &WitnessSchema<F>) -> Row<F> {
-    todo!();
+    let shape = schema.len();
+
+    let mut row = Row::from_elem(shape, F::ZERO);
+
+    fn produce_o_row_recursively<F: PrimeField>(
+        expr: &RightExpr<F>,
+        schema: &WitnessSchema<F>,
+        is_positive: bool,
+        row: &mut Row<F>,
+    ) {
+        let sign = if is_positive { F::ONE } else { -F::ONE };
+
+        match expr {
+            normalization::MulGenericExpr::Add { left, right } => {
+                produce_o_row_recursively(left, schema, is_positive, row);
+                produce_o_row_recursively(right, schema, is_positive, row);
+            }
+            normalization::MulGenericExpr::Sub { left, right } => {
+                produce_o_row_recursively(left, schema, is_positive, row);
+                produce_o_row_recursively(right, schema, !is_positive, row);
+            }
+            normalization::MulGenericExpr::Mul(mul) => {
+                let normalization::OneVarMul {
+                    scalar,
+                    left,
+                    right: normalization::Nothing,
+                } = mul;
+                let index_of_var = schema
+                .index_of(ScalarOrVarName::VarName(left))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "failed to get witness schema index of `{left}` variable, this is a bug",
+                    )
+                });
+                row[index_of_var] = *scalar * sign;
+            }
+            normalization::MulGenericExpr::UnaryMinus(var) => {
+                let index_of_var = schema
+                    .index_of(ScalarOrVarName::VarName(var))
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "failed to get witness schema index of `{var}` variable, this is a bug",
+                        )
+                    });
+                assert_eq!(
+                    row[index_of_var],
+                    F::ZERO,
+                    "malformed normalized expression, variable `{var}` is not normalized, this is a bug"
+                );
+                row[index_of_var] = -F::ONE * sign;
+            }
+            normalization::MulGenericExpr::Const(scalar) => {
+                let index_of_scalar = schema
+                    .index_of(ScalarOrVarName::Scalar)
+                    .expect("index of scalar should always persist");
+                assert_eq!(
+                    row[index_of_scalar],
+                    F::ZERO,
+                    "malformed normalized expression, scalar is not normalized, this is a bug"
+                );
+                row[index_of_scalar] = *scalar * sign;
+            }
+            normalization::MulGenericExpr::Var(var) => {
+                let index_of_var = schema
+                    .index_of(ScalarOrVarName::VarName(var))
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "failed to get witness schema index of `{var}` variable, this is a bug",
+                        )
+                    });
+                assert_eq!(
+                    row[index_of_var],
+                    F::ZERO,
+                    "malformed normalized expression, variable `{var}` is not normalized, this is a bug"
+                );
+                row[index_of_var] = sign;
+            }
+        }
+    }
+
+    produce_o_row_recursively(expr, schema, true, &mut row);
+
+    row
 }
 
 #[cfg(test)]
@@ -192,7 +274,7 @@ mod tests {
     use ff::Field;
 
     use super::*;
-    use crate::r1cs::normalization::VarMul;
+    use crate::r1cs::normalization::{OneVarMul, VarMul};
 
     #[test]
     fn test_produce_l_r_rows_smoke() {
@@ -221,5 +303,24 @@ mod tests {
             right_row, expected_right,
             "expected: {expected_right}, got: {right_row}"
         );
+    }
+
+    #[test]
+    fn test_produce_o_row_smoke() {
+        // -3 * a + 8
+        let expr = RightExpr::Add {
+            left: Box::new(RightExpr::Mul(OneVarMul {
+                scalar: -Scalar::from(3),
+                left: "a".into(),
+                right: normalization::Nothing,
+            })),
+            right: Box::new(RightExpr::Const(Scalar::from(8))),
+        };
+        let schema = WitnessSchema::from_circuit_vars([ScopedVar::Private("a".into())].into());
+
+        let expected_row = Row::from_iter([Scalar::from(8), -Scalar::from(3)]);
+
+        let row = produce_o_row(&expr, &schema);
+        assert_eq!(row, expected_row, "expected: {expected_row}, got: {row}")
     }
 }

@@ -5,8 +5,9 @@ use derive_more::Display;
 use ff::PrimeField;
 
 use super::{
-    MaybeTwoVarMul, MaybeVarName, MulGenericExpr, Nothing, TwoVarMul, VarMul, packing::PackedExpr,
+    MaybeTwoVarMul, MaybeVarName, MulGenericExpr, Nothing, TwoVarMul, packing::PackedExpr,
 };
+use crate::r1cs::normalization::OneVarMul;
 
 /// Normalized left constraint expression with zero or two variable multiplication.
 #[derive(Debug, Display, PartialEq, Eq, Clone)]
@@ -29,8 +30,6 @@ impl<F: PrimeField> Neg for LeftExpr<F> {
 
 /// Normalized right constraint expression where multiplication consist of one variable.
 pub type RightExpr<F> = MulGenericExpr<F, OneVarMul<F>>;
-
-pub type OneVarMul<F> = VarMul<F, Nothing>;
 
 pub fn move_right_to_left<F: PrimeField>(left: &mut Expr<F>, right: &mut Expr<F>) {
     let l = std::mem::replace(left, Expr::Const(F::ZERO));
