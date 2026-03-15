@@ -118,8 +118,7 @@ fn derive_from_normalized<F: PrimeField>(
     schema: &WitnessSchema<F>,
 ) -> R1cs<F> {
     let schema_len = schema.len();
-    let constraints_count = constraints.len();
-    let shape = (constraints_count, schema_len);
+    let shape = (0, schema_len);
 
     let empty = R1cs {
         left: Matrix::default(shape),
