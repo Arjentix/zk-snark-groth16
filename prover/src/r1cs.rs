@@ -2,10 +2,10 @@
 
 use std::collections::HashMap;
 
+use ark_ff::PrimeField;
 use circuit::{ScopedVar, VarName};
 use derive_more::Display;
 use eyre::{ContextCompat as _, Result};
-use ff::PrimeField;
 use indexmap::IndexSet;
 use itertools::Itertools as _;
 
@@ -62,11 +62,12 @@ impl<F: PrimeField> R1cs<F> {
     }
 
     pub fn is_satisfied(&self, witness: &[F]) -> bool {
-        let left_product = self.left.dot(&witness);
-        let right_product = self.right.dot(&witness);
-        let output_product = self.output.dot(&witness);
+        // let left_product = self.left.dot(&witness);
+        // let right_product = self.right.dot(&witness);
+        // let output_product = self.output.dot(&witness);
 
-        left_product * right_product == output_product
+        // left_product * right_product == output_product
+        todo!()
     }
 }
 
@@ -280,8 +281,8 @@ fn produce_o_row<F: PrimeField>(expr: &RightExpr<F>, schema: &WitnessSchema<F>) 
 
 #[cfg(test)]
 mod tests {
-    use bls12_381::Scalar;
-    use ff::Field;
+    use ark_bls12_381::Fq;
+    use ark_ff::{AdditiveGroup as _, Field as _};
 
     use super::*;
     use crate::normalization::{OneVarMul, VarMul};
@@ -289,7 +290,7 @@ mod tests {
     #[test]
     fn test_produce_l_r_rows_smoke() {
         let expr = LeftExpr::Mul(VarMul {
-            scalar: Scalar::from(5),
+            scalar: Fq::from(5),
             left: "a".into(),
             right: "b".into(),
         });
@@ -301,8 +302,8 @@ mod tests {
             .into(),
         );
 
-        let expected_left = Row::from_iter([Scalar::ZERO, Scalar::from(5), Scalar::ZERO]);
-        let expected_right = Row::from_iter([Scalar::ZERO, Scalar::ZERO, Scalar::ONE]);
+        let expected_left = Row::from_iter([Fq::ZERO, Fq::from(5), Fq::ZERO]);
+        let expected_right = Row::from_iter([Fq::ZERO, Fq::ZERO, Fq::ONE]);
 
         let (left_row, right_row) = produce_l_r_rows(&expr, &schema);
         assert_eq!(
@@ -320,15 +321,15 @@ mod tests {
         // -3 * a + 8
         let expr = RightExpr::Add {
             left: Box::new(RightExpr::Mul(OneVarMul {
-                scalar: -Scalar::from(3),
+                scalar: Fq::from(-3),
                 left: "a".into(),
                 right: Nothing,
             })),
-            right: Box::new(RightExpr::Const(Scalar::from(8))),
+            right: Box::new(RightExpr::Const(Fq::from(8))),
         };
         let schema = WitnessSchema::from_circuit_vars([ScopedVar::Private("a".into())].into());
 
-        let expected_row = Row::from_iter([Scalar::from(8), -Scalar::from(3)]);
+        let expected_row = Row::from_iter([Fq::from(8), Fq::from(-3)]);
 
         let row = produce_o_row(&expr, &schema);
         assert_eq!(row, expected_row, "expected: {expected_row}, got: {row}")

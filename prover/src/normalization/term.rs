@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
+use ark_ff::PrimeField;
 use circuit::VarName;
-use ff::PrimeField;
 
 use super::{MaybeTwoVarMul, MaybeVarName, packing::PackedExpr};
 
@@ -108,14 +108,14 @@ fn sum_terms_recursively<F: PrimeField>(
 
 #[cfg(test)]
 mod tests {
-    use bls12_381::Scalar;
+    use ark_bls12_381::Fq;
 
     use super::*;
 
     #[test]
     fn test_sum_terms_smoke() {
         // 2 * a * b + 3 * b * a - a
-        let mut expr = PackedExpr::<Scalar>::Add {
+        let mut expr = PackedExpr::<Fq>::Add {
             left: Box::new(PackedExpr::Mul(MaybeTwoVarMul {
                 scalar: 2.into(),
                 left: "a".into(),

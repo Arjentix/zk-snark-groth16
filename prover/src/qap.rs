@@ -1,6 +1,6 @@
 //! Quadratic Arithmetic Program (QAP) utilities.
 
-use ff::PrimeField;
+use ark_ff::PrimeField;
 
 use crate::r1cs::R1cs;
 

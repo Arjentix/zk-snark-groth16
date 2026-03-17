@@ -5,10 +5,10 @@ use std::{
     ops::{Add, Neg, Sub},
 };
 
+use ark_ff::PrimeField;
 use brackets_reveal::RevealedMul;
 use circuit::{Circuit, Expr, ScopedVar, VarName};
 use derive_more::Display;
-use ff::PrimeField;
 use indexmap::IndexSet;
 use itertools::Itertools as _;
 pub use left_right::{LeftExpr, RightExpr};

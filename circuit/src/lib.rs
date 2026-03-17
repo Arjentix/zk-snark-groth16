@@ -2,9 +2,9 @@
 
 use std::borrow::Cow;
 
+use ark_ff::PrimeField;
 pub use circuit_macro::circuit;
 use derive_more::Display;
-use ff::PrimeField;
 use indexmap::IndexSet;
 use itertools::Itertools as _;
 

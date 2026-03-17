@@ -1,7 +1,7 @@
 use std::ops::Deref as _;
 
+use ark_ff::PrimeField;
 use circuit::{Expr, VarName};
-use ff::PrimeField;
 
 use super::MulGenericExpr;
 
@@ -311,14 +311,14 @@ fn reveal_var<F: PrimeField>(var: VarName) -> RevealedExpr<F> {
 
 #[cfg(test)]
 mod tests {
-    use bls12_381::Scalar;
+    use ark_bls12_381::Fq;
 
     use super::*;
 
     #[test]
     fn test_reveal_smoke() {
         // (-a + b * c) * (d - (e + f)) - g
-        let expr = Expr::<Scalar>::Sub {
+        let expr = Expr::<Fq>::Sub {
             left: Box::new(Expr::Mul {
                 left: Box::new(Expr::Add {
                     left: Box::new(Expr::UnaryMinus(Box::new(Expr::Var("a".into())))),

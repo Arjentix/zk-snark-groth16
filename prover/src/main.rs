@@ -1,6 +1,6 @@
 use std::{collections::HashMap, net::SocketAddr};
 
-use bls12_381::Scalar;
+use ark_bls12_381::Fq;
 use circuit::{Circuit, circuit};
 use eyre::{Context as _, Result};
 use logger::info;
@@ -30,7 +30,7 @@ async fn main() -> Result<()> {
 
     // Circuit
 
-    let circuit: Circuit<Scalar> = circuit!(|pub a, pub b, x, y| {
+    let circuit: Circuit<Fq> = circuit!(|pub a, pub b, x, y| {
         -3*x*x*y + 5*x*y - (x - 2)*y + 3 == a;
         2*x + y == b - 5;
     });
@@ -49,8 +49,8 @@ async fn main() -> Result<()> {
     let computed_vars = normalized_circuit
         .clone()
         .compute(HashMap::from([("x".into(), x), ("y".into(), y)]));
-    let a = -Scalar::from(3) * x * x * y + 5.into() * x * y - (x - 2.into()) * y + 3.into();
-    let b = Scalar::from(2) * x + y + 5.into();
+    let a = Fq::from(-3) * x * x * y + Fq::from(5) * x * y - (x - Fq::from(2)) * y + Fq::from(3);
+    let b = Fq::from(2) * x + y + Fq::from(5);
     assert_eq!(computed_vars.get("a"), Some(&a));
     assert_eq!(computed_vars.get("b"), Some(&b));
     let witness = schema.construct_witness(computed_vars)?;

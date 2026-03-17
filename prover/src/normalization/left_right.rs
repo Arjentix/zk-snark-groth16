@@ -1,8 +1,8 @@
 use std::ops::Neg;
 
+use ark_ff::PrimeField;
 use circuit::Expr;
 use derive_more::Display;
-use ff::PrimeField;
 
 use super::{
     MaybeTwoVarMul, MaybeVarName, MulGenericExpr, Nothing, TwoVarMul, packing::PackedExpr,
@@ -125,18 +125,18 @@ pub fn move_non_var_multiplications_to_right<F: PrimeField>(
 
 #[cfg(test)]
 mod tests {
-    use bls12_381::Scalar;
-    use ff::Field as _;
+    use ark_bls12_381::Fq;
+    use ark_ff::AdditiveGroup as _;
 
     use super::*;
 
     #[test]
     fn test_move_non_var_multiplications_to_right_smoke() {
         // -2 * a * b + d - 3 * f + 4
-        let left = PackedExpr::<Scalar>::Add {
+        let left = PackedExpr::<Fq>::Add {
             left: Box::new(PackedExpr::Add {
                 left: Box::new(PackedExpr::Mul(MaybeTwoVarMul {
-                    scalar: -Scalar::from(2),
+                    scalar: Fq::from(-2),
                     left: "a".into(),
                     right: MaybeVarName::VarName("b".into()),
                 })),
@@ -149,13 +149,13 @@ mod tests {
                     })),
                 }),
             }),
-            right: Box::new(PackedExpr::Const(Scalar::from(4))),
+            right: Box::new(PackedExpr::Const(Fq::from(4))),
         };
-        let mut right = RightExpr::Const(Scalar::ZERO);
+        let mut right = RightExpr::Const(Fq::ZERO);
 
         // -2 * a * b
         let expected_left = LeftExpr::Mul(TwoVarMul {
-            scalar: -Scalar::from(2),
+            scalar: Fq::from(-2),
             left: "a".into(),
             right: "b".into(),
         });
@@ -165,12 +165,12 @@ mod tests {
             left: Box::new(RightExpr::Sub {
                 left: Box::new(RightExpr::UnaryMinus("d".into())),
                 right: Box::new(RightExpr::Mul(OneVarMul {
-                    scalar: -Scalar::from(3),
+                    scalar: Fq::from(-3),
                     left: "f".into(),
                     right: Nothing,
                 })),
             }),
-            right: Box::new(RightExpr::Const(Scalar::from(4))),
+            right: Box::new(RightExpr::Const(Fq::from(4))),
         };
 
         let left = move_non_var_multiplications_to_right(left, &mut right, true);

@@ -1,7 +1,7 @@
 use std::hash::{BuildHasher as _, Hash as _, Hasher as _};
 
+use ark_ff::PrimeField;
 use circuit::{ScopedVar, VarName};
-use ff::PrimeField;
 use indexmap::IndexSet;
 use sorted_vec::SortedVec;
 
@@ -193,7 +193,7 @@ fn gen_var_name(vars: &IndexSet<ScopedVar>, var1: &VarName, var2: &VarName) -> V
 
 #[cfg(test)]
 mod tests {
-    use bls12_381::Scalar;
+    use ark_bls12_381::Fq;
     use regex::Regex;
 
     use super::*;
@@ -207,10 +207,10 @@ mod tests {
             ScopedVar::Private("d".into()),
         ]);
         // (((-2 * (a * (b * c))) + (a * (b * d))) - ((-b * d) - (3 * d)))
-        let expr = RevealedExpr::<Scalar>::Sub {
+        let expr = RevealedExpr::<Fq>::Sub {
             left: Box::new(RevealedExpr::Add {
                 left: Box::new(RevealedExpr::Mul(RevealedMul {
-                    left: Box::new(RevealedMulOperandExpr::Const(-Scalar::from(2))),
+                    left: Box::new(RevealedMulOperandExpr::Const(Fq::from(-2))),
                     right: Box::new(RevealedMulOperandExpr::Mul(RevealedMul {
                         left: Box::new(RevealedMulOperandExpr::Var("a".into())),
                         right: Box::new(RevealedMulOperandExpr::Mul(RevealedMul {
@@ -233,7 +233,7 @@ mod tests {
                     right: Box::new(RevealedMulOperandExpr::Var("d".into())),
                 })),
                 right: Box::new(RevealedExpr::Mul(RevealedMul {
-                    left: Box::new(RevealedMulOperandExpr::Const(Scalar::from(3))),
+                    left: Box::new(RevealedMulOperandExpr::Const(Fq::from(3))),
                     right: Box::new(RevealedMulOperandExpr::Var("d".into())),
                 })),
             }),
@@ -252,8 +252,8 @@ mod tests {
         // ((-2 * cb * a + adb) - (-db - (3 * d)))
         let regex = Regex::new(&format!(
             r"\(\({} \* __c_b_\d+\ \* a \+ __a___d_b_\d+_\d+\) - \(-__d_b_\d+ - {} \* d\)\)",
-            -Scalar::from(2),
-            Scalar::from(3),
+            Fq::from(-2),
+            Fq::from(3),
         ))
         .unwrap();
         let normalized = packed.to_string();
