@@ -7,7 +7,7 @@ use ff::PrimeField;
 use super::{
     MaybeTwoVarMul, MaybeVarName, MulGenericExpr, Nothing, TwoVarMul, packing::PackedExpr,
 };
-use crate::r1cs::normalization::OneVarMul;
+use crate::normalization::OneVarMul;
 
 /// Normalized left constraint expression with zero or two variable multiplication.
 #[derive(Debug, Display, PartialEq, Eq, Clone)]

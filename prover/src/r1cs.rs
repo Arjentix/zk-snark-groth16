@@ -1,16 +1,17 @@
 //! Rank One Constraint System (R1CS) utilities.
 
-use circuit::{Circuit, ScopedVar, VarName};
+use std::collections::HashMap;
+
+use circuit::{ScopedVar, VarName};
 use derive_more::Display;
+use eyre::{ContextCompat as _, Result};
 use ff::PrimeField;
 use indexmap::IndexSet;
 use itertools::Itertools as _;
-use logger::info;
-use normalization::{LeftExpr, NormalizedCircuit, NormalizedConstraint};
 
-use crate::r1cs::normalization::RightExpr;
-
-mod normalization;
+use crate::normalization::{
+    LeftExpr, MulGenericExpr, NormalizedCircuit, Nothing, OneVarMul, RightExpr,
+};
 
 type Matrix<F> = ndarray::Array2<F>;
 type Row<F> = ndarray::Array1<F>;
@@ -27,6 +28,48 @@ pub struct R1cs<F: PrimeField> {
     output: Matrix<F>,
 }
 
+impl<F: PrimeField> R1cs<F> {
+    /// Derives the [`R1CS`](R1cs) from circuit and witness schema.
+    pub fn from_normalized(circuit: &NormalizedCircuit<F>, schema: &WitnessSchema<F>) -> R1cs<F> {
+        let schema_len = schema.len();
+        let shape = (0, schema_len);
+
+        let empty = R1cs {
+            left: Matrix::default(shape),
+            right: Matrix::default(shape),
+            output: Matrix::default(shape),
+        };
+
+        circuit
+            .constraints
+            .iter()
+            .fold(empty, |mut r1cs, constraint| {
+                let (left_row, right_row) = produce_l_r_rows(&constraint.left, schema);
+                r1cs.left.push_row(left_row.view()).expect(
+                    "L matrix row length doesn't match L matrix expectation, this is a bug",
+                );
+                r1cs.right.push_row(right_row.view()).expect(
+                    "R matrix row length doesn't match R matrix expectation, this is a bug",
+                );
+
+                let o_row = produce_o_row(&constraint.right, schema);
+                r1cs.output.push_row(o_row.view()).expect(
+                    "O matrix row length doesn't match O matrix expectation, this is a bug",
+                );
+
+                r1cs
+            })
+    }
+
+    pub fn is_satisfied(&self, witness: &[F]) -> bool {
+        let left_product = self.left.dot(&witness);
+        let right_product = self.right.dot(&witness);
+        let output_product = self.output.dot(&witness);
+
+        left_product * right_product == output_product
+    }
+}
+
 pub struct WitnessSchema<F: PrimeField> {
     /// Scalar multiplier always equal to 1.
     one: F,
@@ -34,23 +77,8 @@ pub struct WitnessSchema<F: PrimeField> {
     vars: IndexSet<ScopedVar>,
 }
 
-/// Derives a R1CS and witness schema from a given circuit.
-pub fn derive<F: PrimeField + std::fmt::Display>(
-    circuit: Circuit<F>,
-) -> (R1cs<F>, WitnessSchema<F>) {
-    let circuit = NormalizedCircuit::normalize(circuit);
-    info!(circuit = %circuit, "normalized circuit");
-
-    let schema = WitnessSchema::from_circuit_vars(circuit.vars);
-    info!(schema = %schema, "witness schema");
-
-    let r1cs = derive_from_normalized(&circuit.constraints, &schema);
-    info!(r1cs = %r1cs, "R1CS");
-    (r1cs, schema)
-}
-
 impl<F: PrimeField> WitnessSchema<F> {
-    fn from_circuit_vars(vars: IndexSet<ScopedVar>) -> Self {
+    pub fn from_circuit_vars(vars: IndexSet<ScopedVar>) -> Self {
         #[cfg(debug_assertions)]
         {
             let mut prev_was_private = false;
@@ -72,12 +100,16 @@ impl<F: PrimeField> WitnessSchema<F> {
     }
 
     /// Returns the number of variables in the schema.
-    fn len(&self) -> usize {
+    #[expect(
+        clippy::len_without_is_empty,
+        reason = "is_empty doesn't make sense for witness schema"
+    )]
+    pub fn len(&self) -> usize {
         self.vars.len() + 1 // +1 for the scalar multiplier
     }
 
     /// Returns the index of the variable in the schema.
-    fn index_of(&self, elem: ScalarOrVarName<'_>) -> Option<usize> {
+    pub fn index_of(&self, elem: ScalarOrVarName<'_>) -> Option<usize> {
         // Technically could be faster with a hashmap, but this is simpler and
         // the number of variables is usually very small.
 
@@ -90,6 +122,16 @@ impl<F: PrimeField> WitnessSchema<F> {
             .iter()
             .position(|v| v.name() == var)
             .map(|i| i + 1) // +1 for the scalar multiplier
+    }
+
+    pub fn construct_witness(&self, vars: HashMap<VarName, F>) -> Result<Vec<F>> {
+        std::iter::once(Ok(self.one))
+            .chain(self.vars.iter().map(|var| {
+                vars.get(var.name())
+                    .copied()
+                    .wrap_err_with(|| format!("missing value for variable `{}`", var.name()))
+            }))
+            .collect()
     }
 }
 
@@ -108,40 +150,9 @@ impl<F: PrimeField + std::fmt::Display> std::fmt::Display for WitnessSchema<F> {
     }
 }
 
-enum ScalarOrVarName<'name> {
+pub enum ScalarOrVarName<'name> {
     Scalar,
     VarName(&'name VarName),
-}
-
-fn derive_from_normalized<F: PrimeField>(
-    constraints: &[NormalizedConstraint<F>],
-    schema: &WitnessSchema<F>,
-) -> R1cs<F> {
-    let schema_len = schema.len();
-    let shape = (0, schema_len);
-
-    let empty = R1cs {
-        left: Matrix::default(shape),
-        right: Matrix::default(shape),
-        output: Matrix::default(shape),
-    };
-
-    constraints.iter().fold(empty, |mut r1cs, constraint| {
-        let (left_row, right_row) = produce_l_r_rows(&constraint.left, schema);
-        r1cs.left
-            .push_row(left_row.view())
-            .expect("L matrix row length doesn't match L matrix expectation, this is a bug");
-        r1cs.right
-            .push_row(right_row.view())
-            .expect("R matrix row length doesn't match R matrix expectation, this is a bug");
-
-        let o_row = produce_o_row(&constraint.right, schema);
-        r1cs.output
-            .push_row(o_row.view())
-            .expect("O matrix row length doesn't match O matrix expectation, this is a bug");
-
-        r1cs
-    })
 }
 
 fn produce_l_r_rows<F: PrimeField>(
@@ -195,19 +206,19 @@ fn produce_o_row<F: PrimeField>(expr: &RightExpr<F>, schema: &WitnessSchema<F>) 
         let sign = if is_positive { F::ONE } else { -F::ONE };
 
         match expr {
-            normalization::MulGenericExpr::Add { left, right } => {
+            MulGenericExpr::Add { left, right } => {
                 produce_o_row_recursively(left, schema, is_positive, row);
                 produce_o_row_recursively(right, schema, is_positive, row);
             }
-            normalization::MulGenericExpr::Sub { left, right } => {
+            MulGenericExpr::Sub { left, right } => {
                 produce_o_row_recursively(left, schema, is_positive, row);
                 produce_o_row_recursively(right, schema, !is_positive, row);
             }
-            normalization::MulGenericExpr::Mul(mul) => {
-                let normalization::OneVarMul {
+            MulGenericExpr::Mul(mul) => {
+                let OneVarMul {
                     scalar,
                     left,
-                    right: normalization::Nothing,
+                    right: Nothing,
                 } = mul;
                 let index_of_var = schema
                 .index_of(ScalarOrVarName::VarName(left))
@@ -218,7 +229,7 @@ fn produce_o_row<F: PrimeField>(expr: &RightExpr<F>, schema: &WitnessSchema<F>) 
                 });
                 row[index_of_var] = *scalar * sign;
             }
-            normalization::MulGenericExpr::UnaryMinus(var) => {
+            MulGenericExpr::UnaryMinus(var) => {
                 let index_of_var = schema
                     .index_of(ScalarOrVarName::VarName(var))
                     .unwrap_or_else(|| {
@@ -233,7 +244,7 @@ fn produce_o_row<F: PrimeField>(expr: &RightExpr<F>, schema: &WitnessSchema<F>) 
                 );
                 row[index_of_var] = -F::ONE * sign;
             }
-            normalization::MulGenericExpr::Const(scalar) => {
+            MulGenericExpr::Const(scalar) => {
                 let index_of_scalar = schema
                     .index_of(ScalarOrVarName::Scalar)
                     .expect("index of scalar should always persist");
@@ -244,7 +255,7 @@ fn produce_o_row<F: PrimeField>(expr: &RightExpr<F>, schema: &WitnessSchema<F>) 
                 );
                 row[index_of_scalar] = *scalar * sign;
             }
-            normalization::MulGenericExpr::Var(var) => {
+            MulGenericExpr::Var(var) => {
                 let index_of_var = schema
                     .index_of(ScalarOrVarName::VarName(var))
                     .unwrap_or_else(|| {
@@ -273,7 +284,7 @@ mod tests {
     use ff::Field;
 
     use super::*;
-    use crate::r1cs::normalization::{OneVarMul, VarMul};
+    use crate::normalization::{OneVarMul, VarMul};
 
     #[test]
     fn test_produce_l_r_rows_smoke() {
@@ -311,7 +322,7 @@ mod tests {
             left: Box::new(RightExpr::Mul(OneVarMul {
                 scalar: -Scalar::from(3),
                 left: "a".into(),
-                right: normalization::Nothing,
+                right: Nothing,
             })),
             right: Box::new(RightExpr::Const(Scalar::from(8))),
         };

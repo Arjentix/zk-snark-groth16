@@ -1,6 +1,9 @@
 //! Circuit normalization for R1CS form.
 
-use std::ops::{Add, Neg, Sub};
+use std::{
+    collections::HashMap,
+    ops::{Add, Neg, Sub},
+};
 
 use brackets_reveal::RevealedMul;
 use circuit::{Circuit, Expr, ScopedVar, VarName};
@@ -16,6 +19,7 @@ mod packing;
 mod term;
 
 /// Normalized circuit.
+#[derive(Clone)]
 pub struct NormalizedCircuit<F: PrimeField> {
     pub vars: IndexSet<ScopedVar>,
     pub constraints: Vec<NormalizedConstraint<F>>,
@@ -71,11 +75,15 @@ impl<F: PrimeField> NormalizedCircuit<F> {
 
         Self { vars, constraints }
     }
+
+    pub fn compute(self, vars: HashMap<VarName, F>) -> HashMap<VarName, F> {
+        todo!()
+    }
 }
 
 /// Normalized constraint where left is a multiplication of variables and right is a normalized
 /// expression.
-#[derive(Debug, Display)]
+#[derive(Debug, Display, Clone)]
 #[display("{left} == {right}")]
 pub struct NormalizedConstraint<F: PrimeField> {
     pub left: LeftExpr<F>,
@@ -83,7 +91,7 @@ pub struct NormalizedConstraint<F: PrimeField> {
 }
 
 /// Like `()`, but implements [`std::fmt::Display`]
-#[derive(Debug, Display, PartialEq, Eq)]
+#[derive(Debug, Display, Copy, Clone, PartialEq, Eq)]
 #[display("")]
 pub struct Nothing;
 
