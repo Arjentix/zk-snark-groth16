@@ -46,14 +46,20 @@ async fn main() -> Result<()> {
 
     let x = 3.into();
     let y = 5.into();
-    let computed_vars = normalized_circuit
+    let mut vars = HashMap::from([("x".into(), x), ("y".into(), y)]);
+
+    let solution = normalized_circuit
         .clone()
-        .compute(HashMap::from([("x".into(), x), ("y".into(), y)]));
+        .solve(&vars)
+        .wrap_err("failed to solve the circuit for {vars:?}")?;
     let a = Fq::from(-3) * x * x * y + Fq::from(5) * x * y - (x - Fq::from(2)) * y + Fq::from(3);
     let b = Fq::from(2) * x + y + Fq::from(5);
-    assert_eq!(computed_vars.get("a"), Some(&a));
-    assert_eq!(computed_vars.get("b"), Some(&b));
-    let witness = schema.construct_witness(computed_vars)?;
+    assert_eq!(solution.get("a"), Some(&a));
+    assert_eq!(solution.get("b"), Some(&b));
+
+    vars.extend(solution);
+    let witness = schema.construct_witness(vars)?;
+    info!(witness = ?witness, "witness");
 
     // R1CS
 

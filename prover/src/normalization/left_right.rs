@@ -28,8 +28,53 @@ impl<F: PrimeField> Neg for LeftExpr<F> {
     }
 }
 
+impl<F: PrimeField> From<LeftExpr<F>> for Expr<F> {
+    fn from(left: LeftExpr<F>) -> Self {
+        match left {
+            LeftExpr::Zero => Expr::Const(F::ZERO),
+            LeftExpr::Mul(TwoVarMul {
+                scalar,
+                left,
+                right,
+            }) => Expr::Mul {
+                left: Box::new(Expr::Mul {
+                    left: Box::new(Expr::Const(scalar)),
+                    right: Box::new(Expr::Var(left)),
+                }),
+                right: Box::new(Expr::Var(right)),
+            },
+        }
+    }
+}
+
 /// Normalized right constraint expression where multiplication consist of one variable.
 pub type RightExpr<F> = MulGenericExpr<F, OneVarMul<F>>;
+
+impl<F: PrimeField> From<RightExpr<F>> for Expr<F> {
+    fn from(right: RightExpr<F>) -> Self {
+        match right {
+            RightExpr::Add { left, right } => Expr::Add {
+                left: Box::new(Expr::from(*left)),
+                right: Box::new(Expr::from(*right)),
+            },
+            RightExpr::Sub { left, right } => Expr::Sub {
+                left: Box::new(Expr::from(*left)),
+                right: Box::new(Expr::from(*right)),
+            },
+            RightExpr::Const(c) => Expr::Const(c),
+            RightExpr::Var(var_name) => Expr::Var(var_name),
+            RightExpr::UnaryMinus(var_name) => Expr::UnaryMinus(Box::new(Expr::Var(var_name))),
+            RightExpr::Mul(OneVarMul {
+                scalar,
+                left,
+                right: Nothing,
+            }) => Expr::Mul {
+                left: Box::new(Expr::Const(scalar)),
+                right: Box::new(Expr::Var(left)),
+            },
+        }
+    }
+}
 
 pub fn move_right_to_left<F: PrimeField>(left: &mut Expr<F>, right: &mut Expr<F>) {
     let l = std::mem::replace(left, Expr::Const(F::ZERO));

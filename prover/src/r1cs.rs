@@ -62,12 +62,13 @@ impl<F: PrimeField> R1cs<F> {
     }
 
     pub fn is_satisfied(&self, witness: &[F]) -> bool {
-        // let left_product = self.left.dot(&witness);
-        // let right_product = self.right.dot(&witness);
-        // let output_product = self.output.dot(&witness);
+        let witness = ndarray::arr1(witness);
 
-        // left_product * right_product == output_product
-        todo!()
+        let left_product = self.left.dot(&witness);
+        let right_product = self.right.dot(&witness);
+        let output_product = self.output.dot(&witness);
+
+        left_product * right_product == output_product
     }
 }
 

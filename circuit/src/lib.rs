@@ -1,6 +1,6 @@
 //! Arithmetic circuit utilities.
 
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::HashMap};
 
 use ark_ff::PrimeField;
 pub use circuit_macro::circuit;
@@ -57,21 +57,31 @@ pub struct Constraint<F: PrimeField> {
 /// Note that division is not supported.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr<F: PrimeField> {
-    Add {
-        left: Box<Expr<F>>,
-        right: Box<Expr<F>>,
-    },
-    Sub {
-        left: Box<Expr<F>>,
-        right: Box<Expr<F>>,
-    },
-    Mul {
-        left: Box<Expr<F>>,
-        right: Box<Expr<F>>,
-    },
-    UnaryMinus(Box<Expr<F>>),
+    Add { left: Box<Self>, right: Box<Self> },
+    Sub { left: Box<Self>, right: Box<Self> },
+    Mul { left: Box<Self>, right: Box<Self> },
+    UnaryMinus(Box<Self>),
     Const(F),
     Var(VarName),
+}
+
+impl<F: PrimeField> Expr<F> {
+    /// Substitute variables in the expression with their values.
+    pub fn substitute(&mut self, vars: &HashMap<VarName, F>) {
+        match self {
+            Self::Add { left, right } | Self::Sub { left, right } | Self::Mul { left, right } => {
+                left.substitute(vars);
+                right.substitute(vars);
+            }
+            Self::UnaryMinus(expr) => expr.substitute(vars),
+            Self::Const(_) => {}
+            Self::Var(name) => {
+                if let Some(value) = vars.get(name) {
+                    *self = Self::Const(*value);
+                }
+            }
+        }
+    }
 }
 
 impl<F: PrimeField + std::fmt::Display> std::fmt::Display for Expr<F> {
